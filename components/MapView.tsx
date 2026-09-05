@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { CORRIDOR_COLORS, type Corridor, type Station } from "@/lib/network";
+import { CORRIDOR_COLORS, CORRIDOR_TO_LINE, type Corridor, type Line, type Station } from "@/lib/network";
 
 // Lightweight icon cache to optimize rendering performance on older/mobile devices
 const iconCache = new Map<string, L.DivIcon>();
@@ -107,8 +107,10 @@ function MapController({
   highlightStations?: Station[];
 }) {
   const map = useMap();
+  const prevHighlightRef = useRef<number>(0);
 
   useEffect(() => {
+    const currentCount = highlightStations?.length || 0;
     if (highlightStations && highlightStations.length > 1) {
       const bounds = L.latLngBounds(
         highlightStations.map((s) => [s.location.lat, s.location.lng] as [number, number])
@@ -116,7 +118,11 @@ function MapController({
       map.fitBounds(bounds, { padding: [60, 60], maxZoom: 14 });
     } else if (selectedStation) {
       map.flyTo([selectedStation.location.lat, selectedStation.location.lng], 13, { duration: 0.8 });
+    } else if (prevHighlightRef.current > 0 && currentCount === 0) {
+      // Returned from active route to reset normal view
+      map.flyTo([19.076, 72.877], 11, { duration: 0.8 });
     }
+    prevHighlightRef.current = currentCount;
   }, [selectedStation, highlightStations, map]);
 
   return null;
@@ -124,26 +130,30 @@ function MapController({
 
 export default function MapView({
   stations,
-  activeCorridor,
+  activeLine = "all",
+  activeCorridor = "all",
   selectedStation,
   highlightStations,
   onSelectStation,
 }: {
   stations: Station[];
-  activeCorridor: Corridor | "all";
+  activeLine?: Line | "all";
+  activeCorridor?: Corridor | "all";
   selectedStation?: Station | null;
   highlightStations?: Station[];
   onSelectStation: (station: Station) => void;
 }) {
   const [currentZoom, setCurrentZoom] = useState<number>(11);
-  const [searchQuery, setSearchQuery] = useState<string>("");
 
   const hasActiveRoute = Boolean(highlightStations && highlightStations.length > 1);
 
-  const visibleStations = useMemo(
-    () => (activeCorridor === "all" ? stations : stations.filter((s) => s.corridor === activeCorridor)),
-    [stations, activeCorridor]
-  );
+  const visibleStations = useMemo(() => {
+    return stations.filter((s) => {
+      if (activeLine !== "all" && s.line !== activeLine) return false;
+      if (activeCorridor !== "all" && s.corridor !== activeCorridor) return false;
+      return true;
+    });
+  }, [stations, activeLine, activeCorridor]);
 
   const routeLines = useMemo(() => {
     const byCorridor = new Map<Corridor, Station[]>();
@@ -154,6 +164,7 @@ export default function MapView({
     }
     return Array.from(byCorridor.entries()).map(([corridor, list]) => ({
       corridor,
+      line: CORRIDOR_TO_LINE[corridor],
       positions: [...list].sort((a, b) => a.sequence - b.sequence).map((s) => [s.location.lat, s.location.lng] as [number, number]),
     }));
   }, [stations]);
@@ -167,48 +178,8 @@ export default function MapView({
     ? [stations.reduce((s, st) => s + st.location.lat, 0) / stations.length, stations.reduce((s, st) => s + st.location.lng, 0) / stations.length]
     : [19.076, 72.877];
 
-  // Search filter
-  const searchResults = useMemo(() => {
-    if (!searchQuery.trim()) return [];
-    const q = searchQuery.toLowerCase();
-    return stations
-      .filter((s) => s.name.toLowerCase().includes(q) || s.code.toLowerCase().includes(q))
-      .slice(0, 5);
-  }, [stations, searchQuery]);
-
   return (
     <div className="relative h-full w-full isolate z-0">
-      {/* Floating Search in upper right */}
-      <div className="absolute top-3 right-3 sm:right-16 z-[990] flex items-center gap-2 pointer-events-auto">
-        <div className="relative">
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search stations..."
-            className="w-36 sm:w-48 rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]/95 px-3 py-1.5 text-xs font-medium text-[rgb(var(--text))] shadow-md backdrop-blur-md focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600"
-          />
-          {searchResults.length > 0 && (
-            <div className="absolute right-0 top-full mt-1 w-48 rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-1 shadow-lg backdrop-blur-md z-[1000]">
-              {searchResults.map((stn) => (
-                <button
-                  key={stn._id || stn.code}
-                  type="button"
-                  onClick={() => {
-                    onSelectStation(stn);
-                    setSearchQuery("");
-                  }}
-                  className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-xs hover:bg-[rgb(var(--surface-2))]"
-                >
-                  <span className="font-semibold text-[rgb(var(--text))]">{stn.name}</span>
-                  <span className="text-[10px] text-[rgb(var(--text-muted))]">{stn.code}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
       <MapContainer center={center} zoom={11} scrollWheelZoom className="h-full w-full">
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
@@ -221,8 +192,10 @@ export default function MapView({
         {/* Network track polylines:
             If a journey route is active, other corridors fade with significantly lower opacity (0.12)
             to make the selected route stand out cleanly */}
-        {routeLines.map(({ corridor, positions }) => {
-          const isLineActive = activeCorridor === "all" || activeCorridor === corridor;
+        {routeLines.map(({ corridor, line, positions }) => {
+          const isLineActive =
+            (activeLine === "all" || line === activeLine) &&
+            (activeCorridor === "all" || corridor === activeCorridor);
           if (!isLineActive) return null;
 
           const polyOpacity = hasActiveRoute ? 0.12 : 0.65;

@@ -22,14 +22,14 @@ export default function StationPanel({
 
   return (
     <>
-      {/* Mobile backdrop so map cannot bleed or receive misclicks */}
+      {/* Mobile backdrop constrained to main stage */}
       <div
-        className="fixed inset-0 z-[1040] bg-black/40 backdrop-blur-[2px] transition-opacity sm:hidden"
+        className="absolute inset-0 z-[1040] bg-black/40 backdrop-blur-[2px] transition-opacity sm:hidden"
         onClick={onClose}
       />
 
-      {/* Main panel - elevated above Leaflet z-index */}
-      <div className="fixed inset-x-2 bottom-2 top-auto z-[1050] max-h-[85vh] sm:max-h-none sm:top-2 sm:bottom-2 sm:right-2 sm:left-auto flex w-auto sm:w-full sm:max-w-md flex-col rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] shadow-2xl overflow-hidden animate-in fade-in slide-in-from-bottom-6 sm:slide-in-from-right-6 duration-200">
+      {/* Main panel - starts at top-3 on the right, exactly matching Suburban Journey Planner level */}
+      <div className="absolute top-3 right-3 bottom-3 left-3 sm:left-auto z-[1050] w-auto sm:w-[420px] max-h-[calc(100%-1.5rem)] flex flex-col rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]/95 backdrop-blur-md shadow-2xl overflow-hidden animate-in fade-in slide-in-from-bottom-4 sm:slide-in-from-right-4 duration-200 pointer-events-auto">
         {/* Header */}
         <div className="flex items-start justify-between border-b border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-5 py-4">
           <div>
