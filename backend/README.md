@@ -4,8 +4,28 @@ Backend for the **AI-powered Passenger Digital Twin and Dynamic ETA Engine**
 — Mumbai Suburban Network. Rebuilt on **TypeScript + Next.js API Routes +
 MongoDB (Mongoose) + JWT + Socket.IO**, per the team's updated tech stack.
 
-> Note: per team instructions, this README is **not** replacing the one in
-> the GitHub repo yet — this file documents the `backend/` folder for now.
+---
+
+## Quick Start (Standalone Execution)
+
+```bash
+# 1. Navigate into backend folder
+cd backend
+
+# 2. Install dependencies
+npm install
+
+# 3. Start the backend server
+npm run dev
+```
+
+The server starts on [http://localhost:5000](http://localhost:5000) with both HTTP API routes and Socket.IO WebSockets.
+
+### Zero-Configuration Local Development
+- **No MongoDB required to run**: If `MONGO_URI` is empty or MongoDB is offline, the backend automatically enters a robust zero-dependency in-memory fallback mode using the built-in 102 Mumbai station dataset and simulated telemetry.
+- **Adding MongoDB**: When ready for database persistence, simply set `MONGO_URI=mongodb://localhost:27017/smartrail` in `.env` and run `npm run seed` to populate initial stations and timetables.
+
+---
 
 ## What changed vs. the earlier plain-Express version
 

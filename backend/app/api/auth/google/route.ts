@@ -2,105 +2,105 @@
 // app/api/auth/google/route.ts
 // ------------------------------------------------------------
 // WHAT THIS FILE DOES (in plain English):
-// Handles POST /api/auth/google. The frontend's "Continue with
-// Google" button gets a signed ID token from Google Identity
-// Services and sends it here. We ask Google to confirm the token
-// is genuine and read the person's Google email out of it, then
-// either log them into their existing Master account or create
-// a brand-new one (first-time Google sign-up) — this is the
-// "Google signup" side of Master Login.
+// Handles POST /api/auth/google — the "Sign up / Continue with
+// Google" button. The frontend uses Google's own Identity
+// Services script to pop up Google's login screen; Google then
+// hands the frontend a signed "ID token" proving who the person
+// is. The frontend sends THAT token here.
 //
-// Only accounts with role "admin" are treated as Master accounts.
-// The very first person to sign up with Google automatically
-// becomes an admin (so there's at least one Master account to
-// start with); anyone after that signs up as a regular "operator"
-// unless an existing admin promotes them in the database.
+// We ask Google's servers to verify the token is genuine and not
+// tampered with, pull the person's email/name out of it, and
+// then either:
+//   - find an existing account with that Google ID and log them
+//     straight in, or
+//   - create a brand-new "passenger" account for them (this is
+//     the "signup" half — no separate signup form needed).
+// Either way we finish by issuing our own normal JWT cookie, so
+// from here on the rest of the app treats Google users exactly
+// like any other logged-in user.
 //
-// We verify the token by asking Google's own tokeninfo endpoint
-// rather than pulling in an extra library — keeps this change
-// small. For a high-traffic production deployment, swap this for
-// the "google-auth-library" package's OAuth2Client.verifyIdToken,
-// which verifies the signature locally instead of calling Google
-// on every login.
+// SETUP: create an OAuth 2.0 Client ID in Google Cloud Console
+// (APIs & Services → Credentials → OAuth client ID → "Web
+// application"), then set GOOGLE_CLIENT_ID in .env to it (the
+// same value is also used by the frontend to render the button).
 // ============================================================
 
 import { NextRequest, NextResponse } from "next/server";
+import { OAuth2Client } from "google-auth-library";
 import { connectToDatabase } from "@/lib/mongodb";
 import { User } from "@/models/User";
 import { generateAuthCookie } from "@/lib/generateToken";
+import { enforceRateLimit, RateLimitError } from "@/middleware/rateLimit";
 
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
-
-interface GoogleTokenInfo {
-  aud: string;
-  sub: string;
-  email: string;
-  email_verified: string; // Google returns this as the string "true"/"false"
-  name?: string;
-  picture?: string;
-  error_description?: string;
-}
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID as string;
+const client = new OAuth2Client(GOOGLE_CLIENT_ID);
 
 export async function POST(req: NextRequest) {
   try {
+    enforceRateLimit(req, "google-auth", { maxAttempts: 15, windowMs: 60 * 1000 });
+
     if (!GOOGLE_CLIENT_ID) {
       return NextResponse.json(
-        { message: "Google Sign-In is not configured on this server (missing GOOGLE_CLIENT_ID)." },
-        { status: 500 }
+        { message: "Google sign-in isn't configured on the server yet (GOOGLE_CLIENT_ID missing)." },
+        { status: 501 }
       );
     }
 
-    const { idToken } = await req.json();
-    if (!idToken) {
-      return NextResponse.json({ message: "Missing Google ID token." }, { status: 400 });
+    const { credential } = await req.json();
+    if (!credential) {
+      return NextResponse.json({ message: "Missing Google credential token." }, { status: 400 });
     }
 
-    const verifyRes = await fetch(
-      `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`
-    );
-    const info = (await verifyRes.json()) as GoogleTokenInfo;
+    let payload;
+    try {
+      const ticket = await client.verifyIdToken({ idToken: credential, audience: GOOGLE_CLIENT_ID });
+      payload = ticket.getPayload();
+    } catch {
+      return NextResponse.json({ message: "Invalid or expired Google credential." }, { status: 401 });
+    }
 
-    if (!verifyRes.ok || info.error_description) {
-      return NextResponse.json({ message: "Google Sign-In verification failed." }, { status: 401 });
-    }
-    if (info.aud !== GOOGLE_CLIENT_ID) {
-      return NextResponse.json({ message: "Google token was not issued for this app." }, { status: 401 });
-    }
-    if (info.email_verified !== "true") {
-      return NextResponse.json({ message: "Google account email is not verified." }, { status: 401 });
+    if (!payload?.sub || !payload.email) {
+      return NextResponse.json({ message: "Google account did not return the expected profile info." }, { status: 400 });
     }
 
     await connectToDatabase();
 
-    let user = await User.findOne({ $or: [{ googleId: info.sub }, { email: info.email }] });
+    let user = await User.findOne({ googleId: payload.sub });
 
     if (!user) {
-      // First-ever Google sign-up becomes the initial Master (admin) account.
-      const isFirstUser = (await User.countDocuments({})) === 0;
-      user = await User.create({
-        username: info.email,
-        email: info.email,
-        name: info.name,
-        googleId: info.sub,
-        role: isFirstUser ? "admin" : "operator",
-      });
-    } else if (!user.googleId) {
-      // An existing account with a matching email — link the Google identity.
-      user.googleId = info.sub;
-      if (!user.name && info.name) user.name = info.name;
-      await user.save();
-    }
+      // No account tied to this Google ID yet — check if the email is
+      // already used by a local-password account first, to avoid
+      // silently creating a duplicate identity for the same person.
+      user = await User.findOne({ email: payload.email.toLowerCase() });
 
-    if (user.role !== "admin") {
-      return NextResponse.json(
-        { message: "This Google account isn't linked to a Master (admin) account yet." },
-        { status: 403 }
-      );
+      if (user && user.authProvider === "local") {
+        // Link the Google identity to their existing local account.
+        user.googleId = payload.sub;
+        await user.save();
+      } else if (!user) {
+        // Brand new person — this is the "signup" path.
+        const baseUsername = payload.email.split("@")[0];
+        let username = baseUsername;
+        let suffix = 0;
+        // Usernames must be unique — nudge with a numeric suffix on collision.
+        while (await User.findOne({ username })) {
+          suffix += 1;
+          username = `${baseUsername}${suffix}`;
+        }
+
+        user = await User.create({
+          username,
+          email: payload.email.toLowerCase(),
+          googleId: payload.sub,
+          authProvider: "google",
+          role: "passenger",
+        });
+      }
     }
 
     const response = NextResponse.json({
       message: "Logged in with Google successfully.",
-      user: { id: user._id, username: user.username, role: user.role, name: user.name, email: user.email },
+      user: { id: user._id, username: user.username, email: user.email, role: user.role },
     });
 
     const cookie = generateAuthCookie(user._id.toString());
@@ -108,8 +108,14 @@ export async function POST(req: NextRequest) {
 
     return response;
   } catch (error) {
+    if (error instanceof RateLimitError) {
+      return NextResponse.json(
+        { message: error.message },
+        { status: error.status, headers: { "Retry-After": String(error.retryAfterSeconds) } }
+      );
+    }
     return NextResponse.json(
-      { message: "Server error during Google Sign-In.", error: (error as Error).message },
+      { message: "Google sign-in failed.", error: (error as Error).message },
       { status: 500 }
     );
   }

@@ -36,8 +36,12 @@ app.prepare().then(async () => {
   // Warm-start the digital twin's in-memory station state from the
   // most recent saved crowd readings, so /api/heatmap has real data
   // right away instead of showing all-zero occupancy after a restart.
-  await connectToDatabase();
-  await seedStateFromLatestCrowdLogs();
+  try {
+    await connectToDatabase();
+    await seedStateFromLatestCrowdLogs();
+  } catch (e) {
+    console.log("ℹ MongoDB is offline or unconfigured. Running in zero-dependency fallback mode.");
+  }
 
   const httpServer = createServer((req, res) => {
     // Every normal HTTP request (pages, /api/* routes) is handed

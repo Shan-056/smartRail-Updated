@@ -14,12 +14,8 @@
 
 import mongoose from "mongoose";
 
-const MONGO_URI = process.env.MONGO_URI as string;
-
-if (!MONGO_URI) {
-  throw new Error(
-    "MONGO_URI is not set. Copy .env.example to .env.local and fill in your MongoDB Atlas connection string."
-  );
+export function isMongoConfigured(): boolean {
+  return Boolean(process.env.MONGO_URI || process.env.MONGODB_URI);
 }
 
 // TypeScript doesn't know about our custom global cache property by
@@ -46,14 +42,30 @@ global.mongooseCache = cached;
  * one connection and remembers it for next time.
  */
 export async function connectToDatabase() {
-  if (cached.conn) {
+  const uri = process.env.MONGO_URI || process.env.MONGODB_URI;
+  if (!uri) {
+    return null;
+  }
+
+  if (cached.conn && mongoose.connection.readyState === 1) {
     return cached.conn;
   }
 
-  if (!cached.promise) {
-    cached.promise = mongoose.connect(MONGO_URI).then((m) => m);
-  }
+  try {
+    mongoose.set("bufferCommands", false);
+    if (!cached.promise) {
+      cached.promise = mongoose.connect(uri, {
+        serverSelectionTimeoutMS: 1500,
+        connectTimeoutMS: 1500,
+      });
+    }
 
-  cached.conn = await cached.promise;
-  return cached.conn;
+    cached.conn = await cached.promise;
+    return cached.conn;
+  } catch (err) {
+    // If MongoDB server is offline or unreachable, cleanly fall back to in-memory datasets
+    cached.promise = null;
+    cached.conn = null;
+    return null;
+  }
 }

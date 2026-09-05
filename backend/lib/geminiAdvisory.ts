@@ -127,7 +127,7 @@ Respond in strict JSON format matching this schema:
 }`;
 
       const response = await client.models.generateContent({
-        model: "gemini-3.7-flash",
+        model: "gemini-2.5-flash",
         contents: prompt,
         config: { responseMimeType: "application/json" },
       });

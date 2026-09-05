@@ -15,7 +15,7 @@
 import mongoose from "mongoose";
 
 export function isMongoConfigured(): boolean {
-  return Boolean(process.env.MONGO_URI);
+  return Boolean(process.env.MONGO_URI || process.env.MONGODB_URI);
 }
 
 // TypeScript doesn't know about our custom global cache property by
@@ -42,7 +42,7 @@ global.mongooseCache = cached;
  * one connection and remembers it for next time.
  */
 export async function connectToDatabase() {
-  const uri = process.env.MONGO_URI;
+  const uri = process.env.MONGO_URI || process.env.MONGODB_URI;
   if (!uri) {
     return null;
   }

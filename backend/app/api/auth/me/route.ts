@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
   try {
     const user = await requireAuth(req);
     return NextResponse.json({
-      user: { id: user._id, username: user.username, role: user.role, name: user.name, email: user.email },
+      user: { id: user._id, username: user.username, role: user.role },
     });
   } catch (error) {
     if (error instanceof AuthError) {

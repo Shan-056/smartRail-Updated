@@ -50,9 +50,31 @@ export async function requireAuth(req: NextRequest): Promise<IUser> {
     throw new AuthError("Not authorized — invalid or expired token.");
   }
 
-  await connectToDatabase();
-  const user = await User.findById(decoded.userId).select("-password");
+  let user = null;
+  try {
+    const db = await connectToDatabase();
+    if (db) {
+      user = await User.findById(decoded.userId).select("-password");
+    }
+  } catch {
+    // If DB is unreachable, proceed to check fallback demo users
+  }
+
   if (!user) {
+    // Check built-in demo users
+    const demoAccounts: Record<string, { _id: string; username: string; email: string; role: IUser["role"] }> = {
+      usr_admin: { _id: "usr_admin", username: "admin", email: "admin@smartrailtwin.local", role: "admin" },
+      usr_passenger1: { _id: "usr_passenger1", username: "passenger1", email: "passenger1@example.com", role: "passenger" },
+      usr_device01: { _id: "usr_device01", username: "device01", email: "device01@smartrailtwin.local", role: "device" },
+      usr_operator: { _id: "usr_operator", username: "operator", email: "operator@smartrailtwin.local", role: "operator" },
+      usr_demo: { _id: "usr_demo", username: "demo", email: "demo@smartrailtwin.local", role: "passenger" },
+    };
+
+    const fallbackUser = demoAccounts[decoded.userId];
+    if (fallbackUser) {
+      return fallbackUser as unknown as IUser;
+    }
+
     throw new AuthError("Not authorized — user no longer exists.");
   }
 

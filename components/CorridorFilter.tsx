@@ -21,7 +21,7 @@ export default function CorridorFilter({
   onChange: (value: Corridor | "all") => void;
 }) {
   return (
-    <div className="flex gap-2 overflow-x-auto px-4 py-2.5 sm:px-6">
+    <div className="flex items-center gap-1.5 overflow-x-auto py-1 max-w-full sm:max-w-3xl no-scrollbar">
       <Chip label="All lines" selected={active === "all"} onClick={() => onChange("all")} />
       {CORRIDORS.map((c) => (
         <Chip key={c} label={CORRIDOR_LABELS[c]} selected={active === c} onClick={() => onChange(c)} />

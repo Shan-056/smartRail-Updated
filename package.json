@@ -4,9 +4,9 @@
   "private": true,
   "description": "SmartRail Twin — Passenger Digital Twin, Dynamic ETA & Crowd Prediction (Next.js + TypeScript, full-stack: API + frontend)",
   "scripts": {
-    "dev": "next dev -p 3000",
+    "dev": "next dev -p 3000 -H 0.0.0.0",
     "build": "next build",
-    "start": "next start -p 3000",
+    "start": "next start -p 3000 -H 0.0.0.0",
     "seed": "ts-node -r dotenv/config -r tsconfig-paths/register --transpile-only scripts/seed.ts",
     "lint": "next lint"
   },

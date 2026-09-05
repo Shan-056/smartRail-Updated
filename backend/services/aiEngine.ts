@@ -3,229 +3,165 @@
 // ------------------------------------------------------------
 // WHAT THIS FILE DOES (in plain English):
 // This is the ONE place in the whole backend that talks to the
-// separate AI/ML engine (the FastAPI service in ../ai-engine).
-// Every other file that wants an AI-powered prediction calls the
-// functions in here — they never call the AI engine directly.
+// separate AI/ML engine (the FastAPI service in ai-engine/, see
+// ai-engine/api/main.py for the source of truth). Every other
+// file that wants an AI-powered prediction calls the functions
+// in here — they never call the AI engine directly.
 //
-// FIX (integration bug): this file previously called a made-up
-// contract (`/predict/crowd` with `{stationId, cctvCount,
-// ticketCount, capacity}` in, `{estimatedCount, densityPercent,
-// level}` out) that was a placeholder guess written before the
-// real AI engine existed. Now that the real engine is available
-// (see ../ai-engine/api/main.py), this file has been rewritten to
-// match its ACTUAL request/response shapes exactly. Every request
-// field below is required by a pydantic model in that file, and
-// every response field is read from what that endpoint actually
-// returns — nothing here is guessed.
+// These request/response shapes are copied EXACTLY from
+// ai-engine/api/main.py's pydantic models, field for field —
+// this file is the integration point, so it must match that
+// contract precisely (snake_case field names, since that's what
+// FastAPI/pydantic expects on the wire).
 //
-// Every function still returns null (never throws) when the AI
-// engine is unreachable, unsupported for a given station, or
-// returns an error, so callers keep working with their own
-// deterministic fallback the whole time the AI engine is down —
-// that graceful-degradation behavior is unchanged.
+// The AI engine was only trained on the Western line stations
+// (CCG, MEL, CRD, GRT, MBC, DDR, BND, AND, BVI, VR — see
+// ai-engine/config.py's STATION_IDS). Calling it with any other
+// station_id returns a 422 from FastAPI's own validation, which
+// every function below treats the same as "engine unreachable" —
+// it returns null so the caller (services/analyticsEngine.ts)
+// falls back to its own built-in math. This is what lets Central
+// line / other stations work in the app today even though no
+// model has been trained for them yet.
 // ============================================================
 
-import { resolveAiStationId } from "@/lib/aiStationMap";
+const AI_ENGINE_URL = process.env.AI_ENGINE_URL || "http://localhost:8000";
+const REQUEST_TIMEOUT_MS = 4000;
 
-const AI_ENGINE_URL = (process.env.AI_ENGINE_URL || "http://localhost:8000").replace(/\/+$/, "");
-const AI_ENGINE_TIMEOUT_MS = 3000;
-
-async function postToAiEngine<T>(path: string, body: unknown): Promise<T | null> {
+async function callAiEngine<TResponse>(path: string, payload: unknown): Promise<TResponse | null> {
   try {
     const res = await fetch(`${AI_ENGINE_URL}${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify(payload),
       // Don't let a slow/unreachable AI engine hang the whole request
-      signal: AbortSignal.timeout(AI_ENGINE_TIMEOUT_MS),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
-    if (!res.ok) return null;
-    return (await res.json()) as T;
+
+    if (!res.ok) return null; // includes 422 "unknown station_id" — caller falls back
+    return (await res.json()) as TResponse;
   } catch {
-    // AI engine not running, network error, or timed out — caller falls back
+    // AI engine not running, network error, or timeout — caller falls back
     return null;
   }
 }
 
-async function getFromAiEngine<T>(path: string): Promise<T | null> {
-  try {
-    const res = await fetch(`${AI_ENGINE_URL}${path}`, {
-      method: "GET",
-      signal: AbortSignal.timeout(AI_ENGINE_TIMEOUT_MS),
-    });
-    if (!res.ok) return null;
-    return (await res.json()) as T;
-  } catch {
-    return null;
-  }
-}
-
-// ---------------------------------------------------------------
-// /predict/crowd
-// ---------------------------------------------------------------
+// ---------------- /predict/crowd ----------------
 
 export interface CrowdPredictionRequest {
-  stationName: string; // resolved internally to the AI engine's station_id
-  timestamp: string; // ISO string
-  recentCrowdDensity: number[]; // 0-1 scale, most-recent-last
-  recentEntryCounts: number[];
-  recentExitCounts: number[];
-  recentTicketActivity: number[];
+  station_id: string;
+  timestamp?: string;
+  recent_crowd_density: number[]; // 0-1 scale, most-recent-last
+  recent_entry_counts: number[];
+  recent_exit_counts: number[];
+  recent_ticket_activity: number[];
 }
 
 export interface CrowdPredictionResponse {
+  station: string;
   currentCrowdPercentage: number;
   predicted15MinCrowdPercentage: number | null;
   predicted30MinCrowdPercentage: number | null;
   capacityExceedanceProbability: number | null;
-  risk: "LOW" | "MEDIUM" | "HIGH" | "UNKNOWN";
+  risk: "low" | "moderate" | "high" | "critical";
+  timestamp: string;
 }
 
-export async function getAiCrowdPrediction(
-  payload: CrowdPredictionRequest
-): Promise<CrowdPredictionResponse | null> {
-  const stationId = resolveAiStationId(payload.stationName);
-  if (!stationId) return null; // outside the AI engine's trained coverage
-
-  return postToAiEngine<CrowdPredictionResponse>("/predict/crowd", {
-    station_id: stationId,
-    timestamp: payload.timestamp,
-    recent_crowd_density: payload.recentCrowdDensity,
-    recent_entry_counts: payload.recentEntryCounts,
-    recent_exit_counts: payload.recentExitCounts,
-    recent_ticket_activity: payload.recentTicketActivity,
-  });
+export function getAiCrowdPrediction(payload: CrowdPredictionRequest) {
+  return callAiEngine<CrowdPredictionResponse>("/predict/crowd", payload);
 }
 
-// ---------------------------------------------------------------
-// /predict/eta
-// ---------------------------------------------------------------
+// ---------------- /predict/eta ----------------
 
 export interface EtaPredictionRequest {
-  trainId: string;
-  currentStationName: string;
-  nextStationName: string;
-  timestamp: string;
-  speedKmph: number;
-  distanceToNextStationKm: number;
-  delayMinutes?: number;
-  stopSequence?: number;
-  isFastTrain?: boolean;
-  stationCrowdDensity?: number; // 0-1 scale
-  scheduledMinutes?: number;
+  train_id: string;
+  station_id: string;
+  next_station_id: string;
+  timestamp?: string;
+  speed_kmh: number;
+  distance_to_next_station_km: number;
+  delay_min?: number;
+  stop_sequence?: number;
+  train_type_fast?: boolean;
+  station_crowd_density?: number;
+  scheduled_minutes?: number;
 }
 
 export interface EtaPredictionResponse {
+  trainId: string;
+  station: string;
+  scheduledMinutes: number;
   predictedMinutes: number;
   delayMinutes: number;
-  scheduledMinutes: number;
-  modelUsed: string | null;
+  modelMetadata: { model: string };
+  timestamp: string;
 }
 
-export async function getAiEtaPrediction(
-  payload: EtaPredictionRequest
-): Promise<EtaPredictionResponse | null> {
-  const stationId = resolveAiStationId(payload.currentStationName);
-  const nextStationId = resolveAiStationId(payload.nextStationName);
-  if (!stationId || !nextStationId) return null;
-
-  const result = await postToAiEngine<{
-    predictedMinutes: number;
-    delayMinutes: number;
-    scheduledMinutes: number;
-    modelMetadata?: { model?: string | null };
-  }>("/predict/eta", {
-    train_id: payload.trainId,
-    station_id: stationId,
-    next_station_id: nextStationId,
-    timestamp: payload.timestamp,
-    speed_kmh: payload.speedKmph,
-    distance_to_next_station_km: payload.distanceToNextStationKm,
-    delay_min: payload.delayMinutes ?? 0,
-    stop_sequence: payload.stopSequence ?? 0,
-    train_type_fast: payload.isFastTrain ?? false,
-    station_crowd_density: payload.stationCrowdDensity ?? 0,
-    scheduled_minutes: payload.scheduledMinutes,
-  });
-
-  if (!result) return null;
-
-  return {
-    predictedMinutes: result.predictedMinutes,
-    delayMinutes: result.delayMinutes,
-    scheduledMinutes: result.scheduledMinutes,
-    modelUsed: result.modelMetadata?.model ?? null,
-  };
+export function getAiEtaPrediction(payload: EtaPredictionRequest) {
+  return callAiEngine<EtaPredictionResponse>("/predict/eta", payload);
 }
 
-// ---------------------------------------------------------------
-// /predict/congestion — not previously wired up anywhere in the
-// backend even though the AI engine has always exposed it. Added
-// so the recommendation/advisory layer can use a real congestion
-// probability instead of only crowd-density thresholds.
-// ---------------------------------------------------------------
+// ---------------- /predict/occupancy ----------------
+
+export interface OccupancyPredictionRequest {
+  train_id: string;
+  station_id: string;
+  next_station_id?: string;
+  timestamp?: string;
+  occupancy_fraction: number; // 0-1.3
+  delay_min?: number;
+  speed_kmh: number;
+  distance_to_next_station_km: number;
+  stop_sequence?: number;
+  train_type_fast?: boolean;
+  boarded?: number;
+  alighted?: number;
+  station_crowd_density?: number;
+}
+
+export interface OccupancyPredictionResponse {
+  trainId: string;
+  currentOccupancy: number;
+  predictedOccupancy: number;
+  overcrowdingProbability: number | null;
+  timestamp: string;
+}
+
+export function getAiOccupancyPrediction(payload: OccupancyPredictionRequest) {
+  return callAiEngine<OccupancyPredictionResponse>("/predict/occupancy", payload);
+}
+
+// ---------------- /predict/congestion ----------------
 
 export interface CongestionPredictionRequest {
-  stationName: string;
-  timestamp: string;
-  recentCrowdDensity: number[];
-  recentEntryCounts: number[];
-  recentTicketActivity: number[];
-  trainsRecentCount?: number;
-  avgDelayRecent?: number;
-  avgOccupancyRecent?: number;
+  station_id: string;
+  timestamp?: string;
+  recent_crowd_density: number[];
+  recent_entry_counts: number[];
+  recent_ticket_activity: number[];
+  trains_recent_count?: number;
+  avg_delay_recent?: number;
+  avg_occupancy_recent?: number;
 }
 
 export interface CongestionPredictionResponse {
-  risk: "LOW" | "MEDIUM" | "HIGH" | "UNKNOWN";
+  risk: "low" | "moderate" | "high" | "critical";
   riskProbability: number;
+  timestamp: string;
 }
 
-export async function getAiCongestionPrediction(
-  payload: CongestionPredictionRequest
-): Promise<CongestionPredictionResponse | null> {
-  const stationId = resolveAiStationId(payload.stationName);
-  if (!stationId) return null;
-
-  return postToAiEngine<CongestionPredictionResponse>("/predict/congestion", {
-    station_id: stationId,
-    timestamp: payload.timestamp,
-    recent_crowd_density: payload.recentCrowdDensity,
-    recent_entry_counts: payload.recentEntryCounts,
-    recent_ticket_activity: payload.recentTicketActivity,
-    trains_recent_count: payload.trainsRecentCount ?? 0,
-    avg_delay_recent: payload.avgDelayRecent ?? 0,
-    avg_occupancy_recent: payload.avgOccupancyRecent ?? 0,
-  });
+export function getAiCongestionPrediction(payload: CongestionPredictionRequest) {
+  return callAiEngine<CongestionPredictionResponse>("/predict/congestion", payload);
 }
 
-// ---------------------------------------------------------------
-// GET /recommendations — the AI engine's own rule-based decision
-// layer, built on top of whatever it currently has in its digital
-// twin memory. Exposed here as a thin passthrough for the backend
-// to optionally blend with (or defer to) its own recommendations
-// route.
-// ---------------------------------------------------------------
+// ---------------- GET /health (used for a quick "is the AI engine up?" check) ----------------
 
-export interface AiRecommendation {
-  station: string;
-  action: string;
-  targetPlatform: number | null;
-  reason: string;
-  riskProbability: number | null;
+export async function getAiEngineHealth() {
+  try {
+    const res = await fetch(`${AI_ENGINE_URL}/health`, { signal: AbortSignal.timeout(2000) });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
 }
-
-export async function getAiRecommendations(
-  stationName?: string
-): Promise<AiRecommendation[] | null> {
-  const stationId = stationName ? resolveAiStationId(stationName) : null;
-  if (stationName && !stationId) return null;
-
-  const query = stationId ? `?station_id=${encodeURIComponent(stationId)}` : "";
-  const result = await getFromAiEngine<{ recommendations: AiRecommendation[] }>(
-    `/recommendations${query}`
-  );
-  return result?.recommendations ?? null;
-}
-
-export { AI_ENGINE_URL };

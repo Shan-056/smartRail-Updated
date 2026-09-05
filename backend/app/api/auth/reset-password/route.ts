@@ -2,57 +2,66 @@
 // app/api/auth/reset-password/route.ts
 // ------------------------------------------------------------
 // WHAT THIS FILE DOES (in plain English):
-// Handles POST /api/auth/reset-password. Takes the username, the
-// one-time code from /api/auth/forgot-password, and a new
-// password. If the code matches, hasn't expired, and belongs to
-// that username, the password is updated (the User model's
-// pre-save hook re-hashes it automatically) and the code is
-// cleared so it can't be reused.
+// Handles POST /api/auth/reset-password. This is step 2 of the
+// "Forgot password?" flow — the user clicked the link from their
+// email (or, in dev mode, the devResetLink in the previous
+// response) and is now submitting a brand-new password.
+//
+// We hash the token they gave us and compare it to the stored
+// hash (never comparing raw tokens), check it hasn't expired,
+// and if everything matches, set the new password and burn the
+// token immediately so it can't be reused.
 // ============================================================
 
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { connectToDatabase } from "@/lib/mongodb";
 import { User } from "@/models/User";
+import { enforceRateLimit, RateLimitError } from "@/middleware/rateLimit";
 
 export async function POST(req: NextRequest) {
   try {
-    const { username, token, newPassword } = await req.json();
-
-    if (!username || !token || !newPassword) {
-      return NextResponse.json(
-        { message: "Username, token, and new password are all required." },
-        { status: 400 }
-      );
-    }
-    if (String(newPassword).length < 8) {
-      return NextResponse.json({ message: "New password must be at least 8 characters." }, { status: 400 });
-    }
+    enforceRateLimit(req, "reset-password", { maxAttempts: 10, windowMs: 10 * 60 * 1000 });
 
     await connectToDatabase();
+    const { email, token, newPassword } = await req.json();
 
-    const tokenHash = crypto.createHash("sha256").update(String(token)).digest("hex");
-    const user = await User.findOne({ username }).select("+resetPasswordTokenHash +resetPasswordExpires");
-
-    const isValid =
-      user &&
-      user.resetPasswordTokenHash === tokenHash &&
-      user.resetPasswordExpires &&
-      user.resetPasswordExpires.getTime() > Date.now();
-
-    if (!isValid || !user) {
-      return NextResponse.json({ message: "Reset code is invalid or has expired." }, { status: 400 });
+    if (!email || !token || !newPassword) {
+      return NextResponse.json({ message: "email, token and newPassword are required." }, { status: 400 });
+    }
+    if (newPassword.length < 8) {
+      return NextResponse.json({ message: "Password must be at least 8 characters." }, { status: 400 });
     }
 
-    user.password = newPassword;
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+
+    const user = await User.findOne({
+      email: email.toLowerCase(),
+      resetPasswordTokenHash: tokenHash,
+      resetPasswordExpires: { $gt: new Date() },
+    }).select("+resetPasswordTokenHash +resetPasswordExpires");
+
+    if (!user) {
+      return NextResponse.json({ message: "This reset link is invalid or has expired." }, { status: 400 });
+    }
+
+    user.password = newPassword; // pre-save hook hashes this automatically
     user.resetPasswordTokenHash = undefined;
     user.resetPasswordExpires = undefined;
+    user.failedLoginAttempts = 0;
+    user.lockedUntil = undefined;
     await user.save();
 
     return NextResponse.json({ message: "Password reset successfully. You can now log in." });
   } catch (error) {
+    if (error instanceof RateLimitError) {
+      return NextResponse.json(
+        { message: error.message },
+        { status: error.status, headers: { "Retry-After": String(error.retryAfterSeconds) } }
+      );
+    }
     return NextResponse.json(
-      { message: "Server error while resetting password.", error: (error as Error).message },
+      { message: "Failed to reset password.", error: (error as Error).message },
       { status: 500 }
     );
   }

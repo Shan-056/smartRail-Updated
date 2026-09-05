@@ -16,6 +16,10 @@ import { AuthProvider } from "@/lib/AuthProvider";
 export const metadata = {
   title: "SmartRail Twin",
   description: "Passenger Digital Twin and Dynamic Crowd & ETA Intelligence for Mumbai Suburban Network",
+  openGraph: {
+    title: "SmartRail Twin",
+    description: "Passenger Digital Twin and Dynamic Crowd & ETA Intelligence for Mumbai Suburban Network",
+  },
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

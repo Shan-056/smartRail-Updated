@@ -2,90 +2,90 @@
 // app/api/auth/forgot-password/route.ts
 // ------------------------------------------------------------
 // WHAT THIS FILE DOES (in plain English):
-// Handles POST /api/auth/forgot-password. The person types their
-// Master username and asks for a reset link. We generate a
-// random one-time code, save only a hashed version of it (so
-// even someone with database access can't reuse it directly),
-// and give it a 15-minute expiry.
+// Handles POST /api/auth/forgot-password. The "Forgot password?"
+// button on the login screen calls this with just an email
+// address. We generate a random, one-time reset code, save only
+// a HASH of it against the user (never the real code), and send
+// the real code to the user's email.
 //
-// NOTE — no email service is wired up yet: this project has no
-// SMTP/SendGrid/Resend configured, so instead of silently doing
-// nothing, this route hands the reset token straight back in the
-// response outside of production (NODE_ENV !== "production") so
-// the Master Login screen can show it directly for this demo/dev
-// setup. In production it deliberately withholds the token and
-// just logs it server-side — plug in a real mail provider and
-// email it instead of returning/logging it.
+// We always return the same generic success message whether or
+// not that email exists in our system — otherwise an attacker
+// could use this endpoint to check which emails are registered.
 //
-// Always responds with the same generic message whether or not
-// the username exists, so this can't be used to check which
-// usernames are real.
+// EMAIL SENDING: no SMTP provider is configured yet. In
+// development (NODE_ENV !== "production"), the reset link is
+// returned directly in the JSON response AND printed to the
+// server console, so the flow is fully testable end-to-end
+// without any email setup. To send real emails in production,
+// plug an SMTP/API-based provider (e.g. nodemailer + SMTP,
+// Resend, SendGrid) into the sendResetEmail() function below —
+// that is the ONLY place that needs to change.
 // ============================================================
 
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { connectToDatabase } from "@/lib/mongodb";
 import { User } from "@/models/User";
-import { checkRateLimit, registerFailure, getClientIp } from "@/lib/rateLimiter";
+import { enforceRateLimit, RateLimitError } from "@/middleware/rateLimit";
 
-const FORGOT_PASSWORD_RATE_LIMIT = {
-  maxAttempts: 5,
-  windowMs: 15 * 60 * 1000,
-  lockoutMs: 15 * 60 * 1000,
-};
+const RESET_TOKEN_TTL_MINUTES = 30;
 
-const GENERIC_MESSAGE = "If a Master account with that username exists, a reset code has been generated.";
+async function sendResetEmail(email: string, resetLink: string) {
+  // TODO: replace with a real email provider before production use.
+  console.log(`\n📧 [dev-mode] Password reset link for ${email}:\n   ${resetLink}\n`);
+}
 
 export async function POST(req: NextRequest) {
   try {
-    const { username } = await req.json();
-    if (!username) {
-      return NextResponse.json({ message: "Username is required." }, { status: 400 });
-    }
-
-    const rateLimitKey = `forgot:${getClientIp(req)}:${String(username).toLowerCase()}`;
-    const status = checkRateLimit(rateLimitKey, FORGOT_PASSWORD_RATE_LIMIT);
-    if (status.blocked) {
-      return NextResponse.json(
-        {
-          message: `Too many reset requests. Try again in ${Math.ceil((status.retryAfterSeconds || 0) / 60)} minute(s).`,
-          lockedOut: true,
-          retryAfterSeconds: status.retryAfterSeconds,
-        },
-        { status: 429 }
-      );
-    }
-    registerFailure(rateLimitKey, FORGOT_PASSWORD_RATE_LIMIT);
+    // Only 5 reset requests per IP per 10 minutes — this endpoint
+    // sends emails, so it needs its own, stricter limit.
+    enforceRateLimit(req, "forgot-password", { maxAttempts: 5, windowMs: 10 * 60 * 1000 });
 
     await connectToDatabase();
-    const user = await User.findOne({ username, role: "admin" });
+    const { email } = await req.json();
 
-    if (!user) {
-      // Same response as the success path — don't reveal whether the username exists.
-      return NextResponse.json({ message: GENERIC_MESSAGE });
+    if (!email) {
+      return NextResponse.json({ message: "Email is required." }, { status: 400 });
     }
 
-    const rawToken = crypto.randomBytes(24).toString("hex");
+    const genericResponse = NextResponse.json({
+      message: "If an account with that email exists, a password reset link has been sent.",
+    });
+
+    const user = await User.findOne({ email: email.toLowerCase(), authProvider: "local" });
+    if (!user) {
+      // Same response either way — don't reveal whether the email exists.
+      return genericResponse;
+    }
+
+    const rawToken = crypto.randomBytes(32).toString("hex");
     const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
 
     user.resetPasswordTokenHash = tokenHash;
-    user.resetPasswordExpires = new Date(Date.now() + 15 * 60 * 1000);
+    user.resetPasswordExpires = new Date(Date.now() + RESET_TOKEN_TTL_MINUTES * 60 * 1000);
     await user.save();
 
-    const isProduction = process.env.NODE_ENV === "production";
-    if (isProduction) {
-      // No email provider configured — log it so an operator can retrieve it
-      // from the server logs, instead of silently discarding it.
-      console.log(`[forgot-password] Reset token for "${username}": ${rawToken} (expires in 15 min)`);
-      return NextResponse.json({ message: GENERIC_MESSAGE });
+    const appUrl = process.env.APP_URL || "http://localhost:3000";
+    const resetLink = `${appUrl}/reset-password?token=${rawToken}&email=${encodeURIComponent(user.email!)}`;
+    await sendResetEmail(user.email!, resetLink);
+
+    if (process.env.NODE_ENV !== "production") {
+      return NextResponse.json({
+        message: "If an account with that email exists, a password reset link has been sent.",
+        devResetLink: resetLink,
+      });
     }
 
-    // Dev/demo convenience: hand the token straight back so the UI can
-    // show a working "reset link" without a real mail server.
-    return NextResponse.json({ message: GENERIC_MESSAGE, resetToken: rawToken });
+    return genericResponse;
   } catch (error) {
+    if (error instanceof RateLimitError) {
+      return NextResponse.json(
+        { message: error.message },
+        { status: error.status, headers: { "Retry-After": String(error.retryAfterSeconds) } }
+      );
+    }
     return NextResponse.json(
-      { message: "Server error while requesting password reset.", error: (error as Error).message },
+      { message: "Failed to process request.", error: (error as Error).message },
       { status: 500 }
     );
   }
