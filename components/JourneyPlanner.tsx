@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { Station } from "@/lib/network";
 import { planJourney, JourneyPlan } from "@/lib/networkFallback";
 
@@ -8,7 +8,7 @@ interface JourneyPlannerProps {
   stations: Station[];
   initialFromCode?: string | null;
   onSelectRoute?: (stations: Station[]) => void;
-  onSelectStation?: (station: Station) => void;
+  onSelectStation?: (station: Station | null) => void;
   onReset?: () => void;
 }
 
@@ -27,6 +27,7 @@ export default function JourneyPlanner({
   const [isExpanded, setIsExpanded] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<TabType>("directions");
   const [selectedRouteIndex, setSelectedRouteIndex] = useState<number>(0);
+  const prevInitialFromRef = useRef<string | null | undefined>(undefined);
 
   useEffect(() => {
     setMounted(true);
@@ -43,13 +44,15 @@ export default function JourneyPlanner({
 
   // Update origin station if user clicked "Plan trip from here" in StationPanel
   useEffect(() => {
-    if (initialFromCode) {
+    if (initialFromCode && initialFromCode !== prevInitialFromRef.current) {
+      prevInitialFromRef.current = initialFromCode;
       setFromCode(initialFromCode);
       setIsExpanded(true);
       setSelectedRouteIndex(0);
-      notifyOriginSelected(initialFromCode);
+    } else if (!initialFromCode) {
+      prevInitialFromRef.current = null;
     }
-  }, [initialFromCode, notifyOriginSelected]);
+  }, [initialFromCode]);
 
   // Reset selected route index when origin or destination changes
   useEffect(() => {
@@ -88,7 +91,16 @@ export default function JourneyPlanner({
 
   const handleOriginChange = (code: string) => {
     setFromCode(code);
-    notifyOriginSelected(code);
+    if (code) {
+      notifyOriginSelected(code);
+    } else {
+      if (onSelectStation) {
+        onSelectStation(null);
+      }
+      if (onReset) {
+        onReset();
+      }
+    }
   };
 
   const handleSwap = () => {
@@ -104,6 +116,7 @@ export default function JourneyPlanner({
     setFromCode("");
     setToCode("");
     setSelectedRouteIndex(0);
+    prevInitialFromRef.current = null;
     if (onSelectRoute) {
       onSelectRoute([]);
     }
@@ -129,9 +142,9 @@ export default function JourneyPlanner({
   }, [stations]);
 
   return (
-    <div className="w-full rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]/95 backdrop-blur-md p-4 shadow-xl transition-all sm:p-5">
+    <div className="w-full max-h-full flex flex-col rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]/95 backdrop-blur-md shadow-2xl overflow-hidden transition-all duration-200">
       {/* Header bar */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between border-b border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-5 py-4 shrink-0">
         <div className="flex items-center gap-2.5">
           <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-brand-600/15 text-brand-600 font-bold dark:bg-brand-500/20 dark:text-brand-400">
             🚆
@@ -161,7 +174,7 @@ export default function JourneyPlanner({
       </div>
 
       {isExpanded && (
-        <div className="mt-3.5 space-y-3.5">
+        <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
           {/* Source & Destination selectors */}
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr,auto,1fr] sm:items-center">
             <div>

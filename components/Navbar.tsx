@@ -39,7 +39,20 @@ export default function Navbar({ onOpenControlRoom }: { onOpenControlRoom?: () =
           <>
             {user ? (
               <div className="flex items-center gap-2">
-                <span className="hidden text-sm text-[rgb(var(--text-muted))] sm:inline">{user.username}</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="hidden text-xs font-medium text-[rgb(var(--text))] sm:inline">{user.username}</span>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                      user.role === "admin"
+                        ? "bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/20"
+                        : user.role === "operator"
+                        ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/20"
+                        : "bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/20"
+                    }`}
+                  >
+                    {user.role}
+                  </span>
+                </div>
                 <button
                   onClick={logout}
                   className="rounded-full border border-[rgb(var(--border))] px-3 py-1.5 text-xs sm:text-sm hover:bg-[rgb(var(--surface-2))]"

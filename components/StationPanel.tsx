@@ -1,12 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { CORRIDOR_LABELS, type Station } from "@/lib/network";
-import CrowdCard from "./predictions/CrowdCard";
-import EtaCard from "./predictions/EtaCard";
-import CongestionCard from "./predictions/CongestionCard";
+import PredictionsView from "./predictions/PredictionsView";
 import StationMapModal from "./StationMapModal";
 import { getStationDepartures } from "@/lib/networkFallback";
+
+interface ActiveAlert {
+  id: string;
+  stationId: string;
+  message: string;
+  severity: "info" | "warning" | "critical";
+  createdAt: string;
+}
 
 export default function StationPanel({
   station,
@@ -18,7 +24,29 @@ export default function StationPanel({
   onPlanTripFromStation?: (station: Station) => void;
 }) {
   const [showStationMap, setShowStationMap] = useState(false);
+  const [stationAlerts, setStationAlerts] = useState<ActiveAlert[]>([]);
   const departures = getStationDepartures(station);
+
+  useEffect(() => {
+    let isCancelled = false;
+    async function loadAlerts() {
+      try {
+        const res = await fetch(`/api/alerts?stationId=${station.code}&activeOnly=true`);
+        if (res.ok) {
+          const data = await res.json();
+          if (!isCancelled && data.alerts) {
+            setStationAlerts(data.alerts);
+          }
+        }
+      } catch {
+        // Silently handle offline/preview
+      }
+    }
+    loadAlerts();
+    return () => {
+      isCancelled = true;
+    };
+  }, [station.code]);
 
   return (
     <>
@@ -68,6 +96,34 @@ export default function StationPanel({
 
         {/* Content body */}
         <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
+          {/* Active Station Alerts Banner (Read-only for passengers) */}
+          {stationAlerts.length > 0 && (
+            <div className="space-y-2">
+              {stationAlerts.map((alt) => (
+                <div
+                  key={alt.id}
+                  className={`rounded-xl border p-3 text-xs flex items-start gap-2.5 ${
+                    alt.severity === "critical"
+                      ? "border-rose-500/30 bg-rose-500/10 text-rose-800 dark:text-rose-300"
+                      : alt.severity === "warning"
+                      ? "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300"
+                      : "border-blue-500/30 bg-blue-500/10 text-blue-800 dark:text-blue-300"
+                  }`}
+                >
+                  <span className="shrink-0 text-sm">
+                    {alt.severity === "critical" ? "🚨" : alt.severity === "warning" ? "⚠️" : "ℹ️"}
+                  </span>
+                  <div>
+                    <div className="flex items-center gap-1.5 font-bold uppercase tracking-wider text-[10px]">
+                      <span>{alt.severity} Alert</span>
+                    </div>
+                    <p className="mt-0.5 leading-relaxed">{alt.message}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Live Departures Section */}
           <div>
             <div className="flex items-center justify-between mb-2">
@@ -124,15 +180,8 @@ export default function StationPanel({
             </div>
           </div>
 
-          {/* Predictions Dropdown Cards */}
-          <div className="space-y-2.5">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-[rgb(var(--text-muted))]">
-              Sensor & ML Predictions
-            </h3>
-            <CrowdCard stationId={station._id} />
-            <EtaCard stationId={station._id} />
-            <CongestionCard stationId={station._id} />
-          </div>
+          {/* Dedicated Predictions View */}
+          <PredictionsView station={station} />
         </div>
 
         {/* Footer with 2D/3D map */}

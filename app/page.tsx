@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import dynamic from "next/dynamic";
 import { Search, X } from "lucide-react";
 import Navbar from "@/components/Navbar";
@@ -52,6 +52,26 @@ export default function HomePage() {
     })();
   }, []);
 
+  const handleSelectStation = useCallback((stn: Station | null) => {
+    setSelectedStation(stn);
+  }, []);
+
+  const handleCloseStationPanel = useCallback(() => {
+    setSelectedStation(null);
+    setPlanOriginCode(null);
+  }, []);
+
+  const handleResetPlanner = useCallback(() => {
+    setHighlightStations([]);
+    setSelectedStation(null);
+    setPlanOriginCode(null);
+  }, []);
+
+  const handlePlanTripFromStation = useCallback((stn: Station) => {
+    setPlanOriginCode(stn.code);
+    setSelectedStation(null);
+  }, []);
+
   const filteredStations = stations.filter((s) => {
     if (!searchQuery) return true;
     return (
@@ -74,7 +94,7 @@ export default function HomePage() {
         />
 
         {/* Station Search Input with light colored border for clear visibility */}
-        <div className="relative">
+        <div className="relative w-full sm:w-auto min-w-[220px] sm:min-w-[280px]">
           <div className="relative flex items-center">
             <Search className="pointer-events-none absolute left-3 h-3.5 w-3.5 text-slate-400 dark:text-zinc-400" />
             <input
@@ -82,7 +102,7 @@ export default function HomePage() {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search station (e.g. Dadar, Andheri)..."
-              className="w-52 sm:w-64 rounded-full border border-slate-300 dark:border-zinc-600 bg-[rgb(var(--surface-2))] pl-8.5 pr-8 py-1.5 text-xs text-[rgb(var(--text))] placeholder-[rgb(var(--text-muted))] shadow-2xs hover:border-slate-400 dark:hover:border-zinc-500 focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600 transition"
+              className="w-full rounded-full border border-slate-300 dark:border-zinc-600 bg-[rgb(var(--surface-2))] pl-9 pr-8 py-1.5 text-xs text-[rgb(var(--text))] placeholder-[rgb(var(--text-muted))] shadow-2xs hover:border-slate-400 dark:hover:border-zinc-500 focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600 transition"
             />
             {searchQuery && (
               <button
@@ -96,7 +116,7 @@ export default function HomePage() {
           </div>
 
           {searchQuery && (
-            <div className="absolute right-0 top-full mt-1.5 z-[1100] max-h-56 w-64 overflow-y-auto rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] shadow-xl p-1 text-xs backdrop-blur-md">
+            <div className="absolute right-0 top-full mt-1.5 z-[1100] max-h-56 w-full min-w-[260px] overflow-y-auto rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] shadow-xl p-1 text-xs backdrop-blur-md">
               {filteredStations.length === 0 ? (
                 <div className="px-3 py-2 text-center text-xs text-[rgb(var(--text-muted))]">
                   No station found
@@ -106,7 +126,7 @@ export default function HomePage() {
                   <button
                     key={stn.code}
                     onClick={() => {
-                      setSelectedStation(stn);
+                      handleSelectStation(stn);
                       setSearchQuery("");
                     }}
                     className="w-full text-left px-3 py-1.5 rounded-lg hover:bg-[rgb(var(--surface-2))] flex items-center justify-between transition"
@@ -136,23 +156,20 @@ export default function HomePage() {
             activeCorridor={corridor}
             selectedStation={selectedStation}
             highlightStations={highlightStations}
-            onSelectStation={(stn) => setSelectedStation(stn)}
+            onSelectStation={handleSelectStation}
           />
         </div>
 
         {/* Floating Journey Planner on top-left (Responsive, non-blocking) */}
-        <div className="absolute top-3 left-3 z-[1000] w-[calc(100%-1.5rem)] sm:w-[420px] max-h-[calc(100%-1.5rem)] overflow-y-auto pointer-events-auto">
+        <div className="absolute top-3 left-3 z-[1000] w-[calc(100%-1.5rem)] sm:w-[420px] max-h-[calc(100%-1.5rem)] flex flex-col pointer-events-auto">
           <JourneyPlanner
             stations={stations}
             initialFromCode={planOriginCode}
             onSelectRoute={(intermediate) => {
               setHighlightStations(intermediate);
             }}
-            onSelectStation={(stn) => setSelectedStation(stn)}
-            onReset={() => {
-              setHighlightStations([]);
-              setSelectedStation(null);
-            }}
+            onSelectStation={handleSelectStation}
+            onReset={handleResetPlanner}
           />
         </div>
 
@@ -160,11 +177,8 @@ export default function HomePage() {
         {selectedStation && (
           <StationPanel
             station={selectedStation}
-            onClose={() => setSelectedStation(null)}
-            onPlanTripFromStation={(stn) => {
-              setPlanOriginCode(stn.code);
-              setSelectedStation(null);
-            }}
+            onClose={handleCloseStationPanel}
+            onPlanTripFromStation={handlePlanTripFromStation}
           />
         )}
       </main>
