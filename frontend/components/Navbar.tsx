@@ -6,7 +6,7 @@ import ThemeToggle from "./ThemeToggle";
 import LoginModal from "./LoginModal";
 
 export default function Navbar({ onOpenControlRoom }: { onOpenControlRoom?: () => void }) {
-  const { user, logout, loading } = useAuth();
+  const { user, logout, loading, switchRole } = useAuth();
   const [showLogin, setShowLogin] = useState(false);
 
   return (
@@ -39,19 +39,29 @@ export default function Navbar({ onOpenControlRoom }: { onOpenControlRoom?: () =
           <>
             {user ? (
               <div className="flex items-center gap-2">
+                {/* Role Switcher Selector */}
                 <div className="flex items-center gap-1.5">
                   <span className="hidden text-xs font-medium text-[rgb(var(--text))] sm:inline">{user.username}</span>
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                  <select
+                    value={user.role}
+                    onChange={(e) => {
+                      const newRole = e.target.value as "admin" | "operator" | "passenger";
+                      switchRole(newRole);
+                    }}
+                    title="Switch role for demo"
+                    aria-label="Switch Role"
+                    className={`cursor-pointer rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider border outline-none ${
                       user.role === "admin"
-                        ? "bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/20"
+                        ? "bg-purple-500/15 text-purple-600 dark:text-purple-400 border-purple-500/30"
                         : user.role === "operator"
-                        ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/20"
-                        : "bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/20"
+                        ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30"
+                        : "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30"
                     }`}
                   >
-                    {user.role}
-                  </span>
+                    <option value="admin">Admin</option>
+                    <option value="operator">Operator</option>
+                    <option value="passenger">Passenger</option>
+                  </select>
                 </div>
                 <button
                   onClick={logout}

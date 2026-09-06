@@ -109,12 +109,19 @@ export async function POST(req: NextRequest) {
     }
     resetRateLimit(req, "login");
 
-    const response = NextResponse.json({
-      message: "Logged in successfully.",
-      user: { id: user._id, username: user.username, email: user.email, role: user.role },
+    const cookie = generateAuthCookie({
+      _id: user._id?.toString() || user.id,
+      role: user.role,
+      username: user.username,
+      email: user.email,
     });
 
-    const cookie = generateAuthCookie(user._id.toString());
+    const response = NextResponse.json({
+      message: "Logged in successfully.",
+      user: { id: user._id?.toString() || user.id, username: user.username, email: user.email, role: user.role },
+      token: cookie.value,
+    });
+
     response.cookies.set(cookie.name, cookie.value, cookie.options);
 
     return response;

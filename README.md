@@ -54,13 +54,91 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
      - **Congestion & Surge Risk**: Predictive surge assessment and actionable crowd-mitigation advisory.
    - Interactive accordion cards with smooth toggle-to-close behavior.
 
-4. **Operations Control Room**:
-   - Multi-camera simulated CCTV feeds across critical vestibules and FOBs.
+4. **Operations Control Room (OCC) & Edge Camera Feeds**:
+   - Multi-camera CCTV feeds across critical suburban vestibules and FOBs.
+   - **CCTV Demo: Phone as Station Camera (Showcase)**: Stream live video from any mobile device or webcam into station feeds.
+   - Role-Based Access Control (Admin, Operator, and Passenger).
    - AI-powered executive operational advisory (natural language operational directives).
    - Real-time station alarm management and manual operator crowd-level overrides.
 
-5. **Theme Support**:
+5. **Instant Role Switching & Authentication**:
+   - Role-aware JWT tokens (`role`, `username`, `email`) and persistent session management.
+   - Fast demo role switcher in both the main navigation bar and OCC modal header for testing Admin, Operator, and Passenger views.
+   - Instant 1-click demo login buttons in the Sign In modal.
+
+6. **Theme Support**:
    - Seamless dark mode and high-contrast light mode with zero layout shift.
+
+---
+
+## 📱 Connecting a Phone Camera as Station CCTV (Localhost & Demo Setup)
+
+The system includes a **Phone as CCTV Camera** edge demo designed for hackathons and live evaluations. It turns any smartphone or secondary device into an edge CCTV station camera streaming directly into the OCC dashboard.
+
+### Architecture & Privacy First
+- **Zero App Installation**: Uses standard browser `navigator.mediaDevices.getUserMedia()` on mobile or desktop browsers.
+- **Lightweight Transport**: Captures frames from a `<video>` element to an offscreen `<canvas>` every 1.5–2 seconds, compresses to JPEG, and sends via `POST /api/cctv/stream`.
+- **Ephemeral In-Memory Buffer**: Raw frames are held strictly in server volatile memory with an automatic **45-second Time-To-Live (TTL)**. **Zero raw frames, face data, or video recordings are written to disk or database.**
+- **Role-Based Protection**: Raw camera feeds and edge stream monitors are restricted to **Operator** and **Admin** roles. Passenger accounts cannot access edge video streams.
+- **Digital Twin Signal Fusion**: Frame-derived passenger counts merge directly into the station crowd calculation pipeline alongside ticketing and sensor telemetry.
+
+---
+
+### Step-by-Step: How to Run the Phone CCTV Demo Locally
+
+#### Method A: Dual-Tab / Web Camera (Fastest on Localhost)
+1. Launch the app locally (`npm run dev`) and open [http://localhost:3000](http://localhost:3000).
+2. Ensure you are signed in or switch your role to **Operator** or **Admin** via the role badge in the top navbar.
+3. Click **"Control Room"** in the top navigation to open the OCC modal.
+4. Go to the **📹 Camera Feeds** tab. At the top, locate the **CCTV Demo: Phone as Station Camera** section.
+5. Select any target station (e.g., *Dadar (DDR)* or *Andheri (AND)*).
+6. Click **"💻 Test Local Cam"** or open a new browser tab to:
+   ```
+   http://localhost:3000/cctv-stream?station=DDR
+   ```
+7. Click **"▶ Start CCTV Broadcast"** and allow camera permissions in your browser.
+8. Switch back to the OCC tab: you will immediately see your live camera feed displaying in real time with station HUD, FPS counters, and simulated passenger detection bounding boxes!
+
+---
+
+#### Method B: 1-Click Virtual Camera Simulation (Zero Setup)
+If you don't have a webcam or want an instant demo:
+1. Open the OCC modal and click the **📹 Camera Feeds** tab.
+2. Under the CCTV Demo monitor, click **"▶ Run Virtual Camera Simulation"**.
+3. A real-time simulated Mumbai Suburban platform CCTV stream will render instantly with moving commuters, railway cars, platform safety lines, and edge AI detection boxes.
+
+---
+
+#### Method C: Connecting a Physical Mobile Phone on Localhost / LAN
+
+> [!IMPORTANT]
+> **Mobile Browser HTTPS Requirement**:
+> Mobile browsers (Google Chrome on Android, Apple Safari on iOS) **strictly require HTTPS** for `navigator.mediaDevices.getUserMedia()`. If you open `http://<your-lan-ip>:3000` on a phone over plain HTTP, the browser will block the camera.
+
+To connect a physical phone to your local dev machine, choose one of these standard methods:
+
+##### 1. Using ngrok (Recommended & Easiest)
+```bash
+# In a new terminal window:
+npx ngrok http 3000
+```
+- Copy the provided HTTPS tunnel URL (e.g. `https://xxxx-xx-xx.ngrok-free.app`).
+- Open `https://xxxx-xx-xx.ngrok-free.app/cctv-stream?station=DDR` in your phone's mobile browser, or scan the QR code displayed in the OCC modal!
+- Grant camera permission and tap **Start Broadcast**.
+- The phone camera will instantly appear on your desktop OCC monitor.
+
+##### 2. Using Next.js Experimental HTTPS
+```bash
+npm run dev -- --experimental-https
+```
+- Open `https://<YOUR-LAPTOP-LOCAL-IP>:3000/cctv-stream?station=DDR` on your phone on the same Wi-Fi network.
+
+##### 3. Android Chrome Flag (Bypass for Plain HTTP LAN Testing)
+If testing without HTTPS on Android:
+1. On your Android phone, open Chrome and navigate to `chrome://flags/#unsafely-treat-insecure-origin-as-secure`.
+2. Enter your laptop's LAN address (e.g. `http://192.168.1.100:3000`).
+3. Set the flag to **Enabled** and restart Chrome.
+4. Open `http://192.168.1.100:3000/cctv-stream?station=DDR` and start camera streaming.
 
 ---
 

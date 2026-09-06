@@ -16,7 +16,7 @@ import jwt from "jsonwebtoken";
 import { connectToDatabase } from "@/lib/mongodb";
 import { User, type IUser } from "@/models/User";
 
-const JWT_SECRET = process.env.JWT_SECRET as string;
+const JWT_SECRET = process.env.JWT_SECRET || "smartrail-default-jwt-secret-key-2025";
 
 // A small custom error type so route handlers can tell "not logged
 // in" apart from "logged in but wrong role" apart from other bugs.
@@ -26,6 +26,13 @@ export class AuthError extends Error {
     super(message);
     this.status = status;
   }
+}
+
+interface DecodedToken {
+  userId: string;
+  role?: IUser["role"];
+  username?: string;
+  email?: string;
 }
 
 /**
@@ -43,9 +50,9 @@ export async function requireAuth(req: NextRequest): Promise<IUser> {
     throw new AuthError("Not authorized — please log in.");
   }
 
-  let decoded: { userId: string };
+  let decoded: DecodedToken;
   try {
-    decoded = jwt.verify(token, JWT_SECRET) as { userId: string };
+    decoded = jwt.verify(token, JWT_SECRET) as DecodedToken;
   } catch {
     throw new AuthError("Not authorized — invalid or expired token.");
   }
@@ -65,6 +72,7 @@ export async function requireAuth(req: NextRequest): Promise<IUser> {
     const demoAccounts: Record<string, { _id: string; username: string; email: string; role: IUser["role"] }> = {
       usr_admin: { _id: "usr_admin", username: "admin", email: "admin@smartrailtwin.local", role: "admin" },
       usr_passenger1: { _id: "usr_passenger1", username: "passenger1", email: "passenger1@example.com", role: "passenger" },
+      usr_stationmaster: { _id: "usr_stationmaster", username: "stationmaster", email: "stationmaster@centralrailway.gov.in", role: "operator" },
       usr_device01: { _id: "usr_device01", username: "device01", email: "device01@smartrailtwin.local", role: "device" },
       usr_operator: { _id: "usr_operator", username: "operator", email: "operator@smartrailtwin.local", role: "operator" },
       usr_demo: { _id: "usr_demo", username: "demo", email: "demo@smartrailtwin.local", role: "passenger" },
@@ -73,6 +81,15 @@ export async function requireAuth(req: NextRequest): Promise<IUser> {
     const fallbackUser = demoAccounts[decoded.userId];
     if (fallbackUser) {
       return fallbackUser as unknown as IUser;
+    }
+
+    if (decoded.role && decoded.userId) {
+      return {
+        _id: decoded.userId,
+        username: decoded.username || decoded.userId,
+        email: decoded.email || `${decoded.username || "user"}@smartrailtwin.local`,
+        role: decoded.role,
+      } as unknown as IUser;
     }
 
     throw new AuthError("Not authorized — user no longer exists.");

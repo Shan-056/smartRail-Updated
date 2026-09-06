@@ -60,8 +60,19 @@ interface AlertItem {
   resolvedBy?: string;
 }
 
+interface LiveStreamInfo {
+  streamId: string;
+  stationId: string;
+  stationName: string;
+  zone: string;
+  frame: string;
+  serverTimestamp: number;
+  deviceInfo?: string;
+  simulatedCount?: number;
+}
+
 export default function ControlRoomModal({ stations, onClose }: ControlRoomModalProps) {
-  const { user } = useAuth();
+  const { user, switchRole } = useAuth();
   const isAdmin = user?.role === "admin";
   const isOperator = user?.role === "operator";
   const canManageOperations = isAdmin || isOperator;
@@ -70,6 +81,13 @@ export default function ControlRoomModal({ stations, onClose }: ControlRoomModal
   const [activeTab, setActiveTab] = useState<
     "cameras" | "crowd-override" | "alerts" | "advisory" | "telemetry" | "cctv"
   >(canManageOperations ? "cameras" : "alerts");
+
+  // Keep tab in sync if user elevates role
+  useEffect(() => {
+    if (canManageOperations && activeTab === "alerts") {
+      // User can stay or switch
+    }
+  }, [canManageOperations, activeTab]);
 
   // Advisory State
   const [advisory, setAdvisory] = useState<AdvisoryData | null>(null);
@@ -85,6 +103,14 @@ export default function ControlRoomModal({ stations, onClose }: ControlRoomModal
   const [newCamLabel, setNewCamLabel] = useState("");
   const [camActionLoading, setCamActionLoading] = useState(false);
   const [cameraFilterLine, setCameraFilterLine] = useState<string>("All");
+
+  // Phone as CCTV Demo State
+  const [demoStation, setDemoStation] = useState("DDR");
+  const [livePhoneStream, setLivePhoneStream] = useState<LiveStreamInfo | null>(null);
+  const [showQrCode, setShowQrCode] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [simulatingPhone, setSimulatingPhone] = useState(false);
+  const [streamHeartbeat, setStreamHeartbeat] = useState(0);
 
   // Crowd Override State
   const [overrides, setOverrides] = useState<CrowdOverrideItem[]>([]);
@@ -188,6 +214,146 @@ export default function ControlRoomModal({ stations, onClose }: ControlRoomModal
       loadAlerts();
     }
   }, [activeTab, canManageOperations, loadAdvisory, loadCameras, loadOverrides, loadAlerts]);
+
+  // --- Check / Poll Live Phone CCTV Stream ---
+  const checkPhoneStream = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/cctv/stream?stationId=${demoStation}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.found && data.stream) {
+          setLivePhoneStream(data.stream);
+          setStreamHeartbeat((prev) => prev + 1);
+        } else {
+          setLivePhoneStream(null);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, [demoStation]);
+
+  useEffect(() => {
+    if (activeTab === "cameras") {
+      checkPhoneStream();
+      const interval = setInterval(checkPhoneStream, 1500);
+      return () => clearInterval(interval);
+    }
+  }, [activeTab, checkPhoneStream]);
+
+  // --- Disconnect Live Phone Stream ---
+  const handleDisconnectStream = async () => {
+    setSimulatingPhone(false);
+    try {
+      await fetch(`/api/cctv/stream?stationId=${demoStation}`, { method: "DELETE" });
+      setLivePhoneStream(null);
+    } catch {
+      // ignore
+    }
+  };
+
+  // --- Virtual CCTV Feed Simulator (For Instant Showcase) ---
+  useEffect(() => {
+    if (!simulatingPhone) return;
+
+    let frameIdx = 0;
+    const canvas = document.createElement("canvas");
+    canvas.width = 480;
+    canvas.height = 360;
+    const ctx = canvas.getContext("2d");
+
+    const interval = setInterval(async () => {
+      if (!ctx) return;
+      frameIdx++;
+
+      // Draw suburban railway platform CCTV frame
+      ctx.fillStyle = "#0f172a";
+      ctx.fillRect(0, 0, 480, 360);
+
+      // Station Platform Deck
+      ctx.fillStyle = "#334155";
+      ctx.fillRect(0, 110, 480, 250);
+
+      // Platform edge tactile yellow safety line
+      ctx.fillStyle = "#eab308";
+      ctx.fillRect(0, 300, 480, 16);
+      ctx.fillStyle = "#020617";
+      for (let x = 0; x < 480; x += 36) {
+        ctx.fillRect(x, 300, 18, 16);
+      }
+
+      // Ballast and tracks
+      ctx.fillStyle = "#020617";
+      ctx.fillRect(0, 316, 480, 44);
+
+      // EMU Train coach alongside platform
+      ctx.fillStyle = "#991b1b";
+      ctx.fillRect(0, 0, 480, 100);
+      ctx.fillStyle = "#f8fafc";
+      ctx.fillRect(0, 25, 480, 25);
+      ctx.fillStyle = "#0284c7";
+      ctx.font = "bold 13px monospace";
+      ctx.fillText("MUMBAI SUBURBAN FAST EMU - PLATFORM 3", 40, 43);
+
+      // Moving simulated passengers
+      const passengerCount = 12 + (frameIdx % 10);
+      for (let i = 0; i < passengerCount; i++) {
+        const px = 40 + ((i * 42 + frameIdx * 10) % 400);
+        const py = 150 + ((i * 32) % 120);
+
+        // Person avatar
+        ctx.fillStyle = i % 3 === 0 ? "#38bdf8" : i % 2 === 0 ? "#f43f5e" : "#fbbf24";
+        ctx.beginPath();
+        ctx.arc(px, py, 9, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = "#cbd5e1";
+        ctx.fillRect(px - 5, py + 9, 10, 20);
+
+        // Edge detection bounding box
+        ctx.strokeStyle = "#10b981";
+        ctx.lineWidth = 1.2;
+        ctx.strokeRect(px - 12, py - 12, 24, 44);
+        ctx.fillStyle = "#10b981";
+        ctx.font = "8px monospace";
+        ctx.fillText(`P${i + 1} 96%`, px - 12, py - 14);
+      }
+
+      // OSD HUD overlay
+      ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
+      ctx.fillRect(10, 10, 260, 46);
+      ctx.fillStyle = "#4ade80";
+      ctx.font = "bold 10px monospace";
+      ctx.fillText(`EDGE CCTV VIRTUAL NODE: ${demoStation}`, 18, 26);
+      ctx.fillStyle = "#94a3b8";
+      ctx.font = "9px monospace";
+      ctx.fillText(`RATE: 2.0s | DETECTIONS: ${passengerCount} | FRAME #${frameIdx}`, 18, 42);
+
+      const frameData = canvas.toDataURL("image/jpeg", 0.6);
+
+      try {
+        const stn = stations.find((s) => s.code === demoStation);
+        await fetch("/api/cctv/stream", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            stationId: demoStation,
+            stationName: stn ? stn.name : demoStation,
+            zone: "Platform 3 Foot Overbridge",
+            frame: frameData,
+            clientTimestamp: Date.now(),
+            deviceInfo: "Edge CCTV Simulator (Virtual Device)",
+            simulatedCount: passengerCount,
+          }),
+        });
+        checkPhoneStream();
+      } catch {
+        // ignore
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [simulatingPhone, demoStation, stations, checkPhoneStream]);
 
   // --- Add Camera (Admin only) ---
   const handleAddCamera = async (e: React.FormEvent) => {
@@ -365,17 +531,29 @@ export default function ControlRoomModal({ stations, onClose }: ControlRoomModal
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-base font-semibold tracking-tight">Operations Control Room (OCC)</h2>
-                <span
-                  className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                {/* Instant Role Switcher for seamless testing */}
+                <select
+                  value={user?.role || "passenger"}
+                  onChange={(e) => {
+                    const newRole = e.target.value as "admin" | "operator" | "passenger";
+                    switchRole(newRole);
+                    if (newRole !== "passenger" && activeTab === "alerts") {
+                      setActiveTab("cameras");
+                    }
+                  }}
+                  title="Switch user role for testing"
+                  className={`cursor-pointer rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider border outline-none ${
                     isAdmin
-                      ? "bg-purple-500/20 text-purple-600 dark:text-purple-400"
+                      ? "bg-purple-500/20 text-purple-600 dark:text-purple-400 border-purple-500/40"
                       : isOperator
-                      ? "bg-amber-500/20 text-amber-600 dark:text-amber-400"
-                      : "bg-blue-500/20 text-blue-600 dark:text-blue-400"
+                      ? "bg-amber-500/20 text-amber-600 dark:text-amber-400 border-amber-500/40"
+                      : "bg-blue-500/20 text-blue-600 dark:text-blue-400 border-blue-500/40"
                   }`}
                 >
-                  {user?.role || "passenger"} role
-                </span>
+                  <option value="admin">Admin (Full OCC)</option>
+                  <option value="operator">Operator (CCTV/Alerts)</option>
+                  <option value="passenger">Passenger (Read-only)</option>
+                </select>
               </div>
               <p className="text-xs text-[rgb(var(--text-muted))]">Mumbai Suburban Digital Twin & Control Center</p>
             </div>
@@ -457,11 +635,309 @@ export default function ControlRoomModal({ stations, onClose }: ControlRoomModal
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-5">
+          {/* Passenger Helper Banner */}
+          {!canManageOperations && (
+            <div className="flex flex-wrap items-center justify-between rounded-xl border border-blue-500/30 bg-blue-500/10 p-3.5 text-xs mb-4 text-blue-700 dark:text-blue-300 gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-base">ℹ️</span>
+                <div>
+                  <span className="font-semibold">Viewing in Passenger Role (Read-only Alerts & Advisory).</span>
+                  <p className="text-[11px] opacity-90">
+                    To test Camera Feeds, Phone as CCTV, and Operations controls, switch your role below:
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    switchRole("admin");
+                    setActiveTab("cameras");
+                  }}
+                  className="rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-purple-700 transition shadow-sm"
+                >
+                  ⚡ Switch to Admin
+                </button>
+                <button
+                  onClick={() => {
+                    switchRole("operator");
+                    setActiveTab("cameras");
+                  }}
+                  className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-amber-700 transition shadow-sm"
+                >
+                  ⚡ Switch to Operator
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* ======================================================== */}
           {/* TAB 1: CAMERA CONNECTIONS (Admin + Operator only) */}
           {/* ======================================================== */}
           {activeTab === "cameras" && canManageOperations && (
             <div className="space-y-5">
+              {/* ==================================================== */}
+              {/* CCTV DEMO SECTION: PHONE AS CCTV CAMERA (SHOWCASE) */}
+              {/* ==================================================== */}
+              <div className="rounded-2xl border-2 border-brand-500/40 bg-[rgb(var(--surface-2))] p-4 shadow-sm space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[rgb(var(--border))] pb-3">
+                  <div className="flex items-center gap-2.5">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-brand-600/15 text-brand-600 text-sm font-bold dark:text-brand-400">
+                      📱
+                    </span>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-sm font-bold text-[rgb(var(--text))]">
+                          CCTV Demo: Phone as Station Camera
+                        </h3>
+                        <span className="rounded-full bg-brand-600/20 px-2 py-0.5 text-[9px] font-extrabold text-brand-600 uppercase tracking-wide dark:text-brand-400">
+                          Showcase Feature
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-[rgb(var(--text-muted))]">
+                        Stream live edge camera frames from any phone or webcam browser via getUserMedia() directly into the OCC.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Station Selector for CCTV Demo */}
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs font-semibold text-[rgb(var(--text-muted))]">
+                      Select Station:
+                    </label>
+                    <select
+                      value={demoStation}
+                      onChange={(e) => {
+                        setDemoStation(e.target.value);
+                        setSimulatingPhone(false);
+                      }}
+                      className="rounded-xl border border-brand-500/40 bg-[rgb(var(--surface))] px-3 py-1.5 text-xs font-bold text-brand-600 dark:text-brand-400 outline-none focus:ring-2 focus:ring-brand-500/30"
+                    >
+                      {stations.map((s) => (
+                        <option key={s.code} value={s.code}>
+                          {s.name} ({s.code}) - {s.line}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* CCTV Showcase Grid: Monitor on Left, Pairing Controls on Right */}
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+                  {/* Monitor Viewport (7 cols) */}
+                  <div className="lg:col-span-7 flex flex-col justify-between rounded-xl border border-slate-800 bg-slate-950 p-2.5 shadow-inner">
+                    <div className="relative aspect-[4/3] w-full overflow-hidden rounded-lg bg-black flex items-center justify-center border border-slate-800/80">
+                      {livePhoneStream ? (
+                        <>
+                          {/* Live Frame Image */}
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={livePhoneStream.frame}
+                            alt="Live Phone CCTV Feed"
+                            className="h-full w-full object-cover"
+                          />
+
+                          {/* HUD Overlay */}
+                          <div className="absolute inset-0 pointer-events-none p-3 flex flex-col justify-between">
+                            <div className="flex items-center justify-between">
+                              <div className="bg-black/75 backdrop-blur-sm px-2 py-0.5 rounded text-[10px] font-mono text-rose-400 border border-rose-500/40 flex items-center gap-1.5 shadow">
+                                <span className="h-2 w-2 rounded-full bg-rose-500 animate-ping" />
+                                LIVE FEED &middot; {livePhoneStream.stationId}
+                              </div>
+                              <div className="bg-black/75 backdrop-blur-sm px-2 py-0.5 rounded text-[10px] font-mono text-emerald-400 border border-emerald-500/40">
+                                FPS: ~15 &middot; HB: #{streamHeartbeat}
+                              </div>
+                            </div>
+
+                            {/* Simulated CV Bounding Box Target */}
+                            <div className="mx-auto w-3/4 h-3/5 rounded border border-emerald-400/60 bg-emerald-500/10 p-2 flex flex-col justify-between">
+                              <div className="flex justify-between text-[9px] font-mono text-emerald-300">
+                                <span>ROI: PLATFORM FLOW</span>
+                                <span>CONF: 94.8%</span>
+                              </div>
+                              <div className="text-center text-[10px] font-mono text-emerald-200 bg-black/60 rounded px-1.5 py-0.5 self-center">
+                                {livePhoneStream.simulatedCount || 16} PASSENGERS IN FRAME
+                              </div>
+                              <div className="text-right text-[9px] font-mono text-emerald-300">
+                                ZONE: {livePhoneStream.zone}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center justify-between text-[10px] font-mono text-slate-300 bg-black/75 backdrop-blur-sm px-2 py-1 rounded">
+                              <span>DEVICE: {livePhoneStream.deviceInfo || "Edge Mobile Camera"}</span>
+                              <span>
+                                LAST: {Math.max(0, Math.round((Date.now() - livePhoneStream.serverTimestamp) / 1000))}s ago
+                              </span>
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        /* Standby Screen when no phone is connected */
+                        <div className="flex flex-col items-center justify-center p-6 text-center space-y-3">
+                          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-900 border border-slate-800 text-3xl shadow">
+                            📡
+                          </div>
+                          <div>
+                            <p className="text-xs font-bold text-slate-200">
+                              Awaiting Phone Camera Stream for {stations.find((s) => s.code === demoStation)?.name || demoStation} ({demoStation})
+                            </p>
+                            <p className="text-[11px] text-slate-400 max-w-xs mt-1">
+                              Connect a phone browser or webcam to broadcast live footage to this station monitor.
+                            </p>
+                          </div>
+
+                          <div className="pt-2 flex flex-wrap items-center justify-center gap-2">
+                            <button
+                              onClick={() => {
+                                setSimulatingPhone(true);
+                              }}
+                              className="rounded-lg bg-emerald-600 hover:bg-emerald-500 px-3 py-1.5 text-xs font-bold text-white transition shadow-sm active:scale-95"
+                            >
+                              ▶ Run Virtual Camera Simulation
+                            </button>
+                            <a
+                              href={`/cctv-stream?station=${demoStation}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="rounded-lg bg-brand-600 hover:bg-brand-500 px-3 py-1.5 text-xs font-bold text-white transition shadow-sm active:scale-95"
+                            >
+                              🔗 Open Webcam in Split Tab
+                            </a>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Stream Actions underneath screen */}
+                    <div className="mt-2.5 flex items-center justify-between px-1 text-xs">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`h-2 w-2 rounded-full ${
+                            livePhoneStream ? "bg-emerald-500 animate-pulse" : "bg-slate-600"
+                          }`}
+                        />
+                        <span className="text-[11px] font-medium text-slate-300">
+                          {livePhoneStream
+                            ? `Connected: ${livePhoneStream.deviceInfo || "Phone Node"}`
+                            : "Status: Standby (Ready to connect)"}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        {simulatingPhone && (
+                          <span className="text-[10px] text-amber-400 bg-amber-950/60 border border-amber-800/40 px-2 py-0.5 rounded font-mono">
+                            SIMULATING
+                          </span>
+                        )}
+                        {livePhoneStream && (
+                          <button
+                            onClick={handleDisconnectStream}
+                            className="rounded bg-rose-600/20 border border-rose-500/30 px-2 py-0.5 text-[10px] font-bold text-rose-400 hover:bg-rose-600/30 transition"
+                          >
+                            Disconnect Stream
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Pairing & Connection Panel (5 cols) */}
+                  <div className="lg:col-span-5 flex flex-col justify-between space-y-3 rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-3.5 text-xs">
+                    <div>
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-[rgb(var(--text-muted))] mb-1">
+                        Connect Phone Camera
+                      </h4>
+                      <p className="text-[11px] text-[rgb(var(--text-muted))]">
+                        Target:{" "}
+                        <strong className="text-[rgb(var(--text))]">
+                          {stations.find((s) => s.code === demoStation)?.name || demoStation} ({demoStation})
+                        </strong>
+                      </p>
+                    </div>
+
+                    {/* Pairing Link */}
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-semibold text-[rgb(var(--text-muted))]">
+                        Direct Phone Streamer URL:
+                      </label>
+                      <div className="flex gap-1.5">
+                        <input
+                          type="text"
+                          readOnly
+                          value={
+                            typeof window !== "undefined"
+                              ? `${window.location.origin}/cctv-stream?station=${demoStation}`
+                              : `/cctv-stream?station=${demoStation}`
+                          }
+                          className="flex-1 rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-2))] px-2.5 py-1 text-[11px] font-mono text-[rgb(var(--text))] outline-none"
+                        />
+                        <button
+                          onClick={() => {
+                            const url =
+                              typeof window !== "undefined"
+                                ? `${window.location.origin}/cctv-stream?station=${demoStation}`
+                                : `/cctv-stream?station=${demoStation}`;
+                            navigator.clipboard.writeText(url);
+                            setCopiedLink(true);
+                            setTimeout(() => setCopiedLink(false), 2000);
+                          }}
+                          className="rounded-lg bg-brand-600 px-3 py-1 text-xs font-semibold text-white hover:bg-brand-700 transition"
+                        >
+                          {copiedLink ? "✓ Copied" : "Copy"}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Action buttons */}
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        onClick={() => setShowQrCode((prev) => !prev)}
+                        className="rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-2))] py-2 px-2 text-center font-semibold text-[rgb(var(--text))] hover:bg-[rgb(var(--border))]/50 transition"
+                      >
+                        {showQrCode ? "Hide QR Code" : "📱 Scan QR Code"}
+                      </button>
+
+                      <a
+                        href={`/cctv-stream?station=${demoStation}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rounded-lg bg-slate-900 border border-slate-700 py-2 px-2 text-center font-semibold text-slate-100 hover:bg-slate-800 transition"
+                      >
+                        💻 Test Local Cam
+                      </a>
+                    </div>
+
+                    {/* QR Code Display Modal / Box */}
+                    {showQrCode && (
+                      <div className="flex flex-col items-center rounded-xl border border-brand-500/30 bg-brand-500/5 p-3 text-center space-y-2">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(
+                            typeof window !== "undefined"
+                              ? `${window.location.origin}/cctv-stream?station=${demoStation}`
+                              : `http://localhost:3000/cctv-stream?station=${demoStation}`
+                          )}`}
+                          alt="CCTV Connect QR Code"
+                          className="h-32 w-32 rounded-lg bg-white p-1.5 shadow"
+                        />
+                        <p className="text-[10px] text-[rgb(var(--text-muted))]">
+                          Scan with your phone camera to open the edge stream node directly for {demoStation}.
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Privacy Guarantee Card */}
+                    <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-2.5 text-[11px] text-emerald-800 dark:text-emerald-300">
+                      <div className="flex items-center gap-1.5 font-bold mb-0.5">
+                        <span>🔒</span> Ephemeral Privacy Guarantee
+                      </div>
+                      <p className="text-[10px] opacity-90 leading-tight">
+                        Frames sent by phone cameras are held in volatile RAM only (auto-purged after 45s). No raw frames or faces are recorded to disk or database. Feeds are strictly restricted to OCC Operators and Admins.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               {/* Role Context Bar */}
               <div className="flex flex-wrap items-center justify-between rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface-2))] p-3 text-xs">
                 <div>

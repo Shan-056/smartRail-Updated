@@ -145,41 +145,71 @@ export default function LoginModal({ onClose }: { onClose: () => void }) {
 
         {mode === "login" && (
           <>
-            {/* Quick Demo Credentials Autofill */}
+            {/* Quick Demo Credentials Autofill & Instant Sign-in */}
             <div className="mb-4 rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface-2))] p-2.5">
               <span className="block text-[11px] font-medium text-[rgb(var(--text-muted))] mb-1.5">
-                Quick Demo Sign-in:
+                Instant Demo Sign-in:
               </span>
               <div className="flex flex-wrap gap-1.5">
                 <button
                   type="button"
-                  onClick={() => {
+                  disabled={busy}
+                  onClick={async () => {
                     setUsername("admin");
                     setPassword("admin123");
+                    setBusy(true);
+                    setMessage(null);
+                    const res = await login("admin", "admin123");
+                    setBusy(false);
+                    if (res.ok) {
+                      onClose();
+                    } else {
+                      setMessage({ text: res.message, tone: "error" });
+                    }
                   }}
-                  className="rounded-lg border border-brand-600/30 bg-brand-600/10 px-2 py-1 text-[11px] font-medium text-brand-600 hover:bg-brand-600/20 transition dark:text-brand-400"
+                  className="rounded-lg border border-purple-500/30 bg-purple-500/10 px-2 py-1 text-[11px] font-medium text-purple-600 hover:bg-purple-500/20 transition dark:text-purple-400"
                 >
-                  Admin (admin)
+                  ⚡ Admin (Full OCC)
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    setUsername("passenger1");
-                    setPassword("password123");
-                  }}
-                  className="rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-2 py-1 text-[11px] font-medium text-[rgb(var(--text))] hover:bg-[rgb(var(--surface-2))] transition"
-                >
-                  Passenger (passenger1)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
+                  disabled={busy}
+                  onClick={async () => {
                     setUsername("operator");
                     setPassword("operator123");
+                    setBusy(true);
+                    setMessage(null);
+                    const res = await login("operator", "operator123");
+                    setBusy(false);
+                    if (res.ok) {
+                      onClose();
+                    } else {
+                      setMessage({ text: res.message, tone: "error" });
+                    }
                   }}
-                  className="rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-2 py-1 text-[11px] font-medium text-[rgb(var(--text))] hover:bg-[rgb(var(--surface-2))] transition"
+                  className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[11px] font-medium text-amber-600 hover:bg-amber-500/20 transition dark:text-amber-400"
                 >
-                  Operator
+                  ⚡ Operator
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={async () => {
+                    setUsername("passenger1");
+                    setPassword("password123");
+                    setBusy(true);
+                    setMessage(null);
+                    const res = await login("passenger1", "password123");
+                    setBusy(false);
+                    if (res.ok) {
+                      onClose();
+                    } else {
+                      setMessage({ text: res.message, tone: "error" });
+                    }
+                  }}
+                  className="rounded-lg border border-blue-500/30 bg-blue-500/10 px-2 py-1 text-[11px] font-medium text-blue-600 hover:bg-blue-500/20 transition dark:text-blue-400"
+                >
+                  ⚡ Passenger
                 </button>
               </div>
             </div>
