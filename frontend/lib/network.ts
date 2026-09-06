@@ -45,6 +45,24 @@ export const CORRIDOR_LABELS: Record<Corridor, string> = {
   "Thane-Panvel": "Trans-Harbour (Thane \u2192 Panvel)",
 };
 
+export const CORRIDOR_TO_LINE: Record<Corridor, Line> = {
+  "Churchgate-Virar": "Western",
+  "CSMT-Thane": "Central",
+  "Thane-Kalyan": "Central",
+  "Kalyan-Kasara": "Central",
+  "Kalyan-Karjat": "Central",
+  "CSMT-Panvel": "Harbour",
+  "Wadala-Goregaon": "Harbour",
+  "Thane-Panvel": "Trans-Harbour",
+};
+
+export const LINE_COLORS: Record<Line, string> = {
+  Western: "#2563eb",
+  Central: "#dc2626",
+  Harbour: "#0284c7",
+  "Trans-Harbour": "#7c3aed",
+};
+
 export const CORRIDOR_COLORS: Record<Corridor, string> = {
   "Churchgate-Virar": "#2563eb",
   "CSMT-Thane": "#dc2626",

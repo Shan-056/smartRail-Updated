@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { Station } from "@/lib/network";
 import { planJourney, JourneyPlan } from "@/lib/networkFallback";
 
@@ -8,7 +8,8 @@ interface JourneyPlannerProps {
   stations: Station[];
   initialFromCode?: string | null;
   onSelectRoute?: (stations: Station[]) => void;
-  onSelectStation?: (station: Station) => void;
+  onSelectStation?: (station: Station | null) => void;
+  onReset?: () => void;
 }
 
 type TabType = "directions" | "departures" | "coaches";
@@ -18,6 +19,7 @@ export default function JourneyPlanner({
   initialFromCode,
   onSelectRoute,
   onSelectStation,
+  onReset,
 }: JourneyPlannerProps) {
   const [mounted, setMounted] = useState(false);
   const [fromCode, setFromCode] = useState<string>("MBC"); // Mumbai Central
@@ -25,17 +27,30 @@ export default function JourneyPlanner({
   const [isExpanded, setIsExpanded] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<TabType>("directions");
   const [selectedRouteIndex, setSelectedRouteIndex] = useState<number>(0);
+  const prevInitialFromRef = useRef<string | null | undefined>(undefined);
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
+  // Helper to open origin station panel
+  const notifyOriginSelected = useCallback((code: string) => {
+    if (!code) return;
+    const stn = stations.find((s) => s.code === code);
+    if (stn && onSelectStation) {
+      onSelectStation(stn);
+    }
+  }, [stations, onSelectStation]);
+
   // Update origin station if user clicked "Plan trip from here" in StationPanel
   useEffect(() => {
-    if (initialFromCode) {
+    if (initialFromCode && initialFromCode !== prevInitialFromRef.current) {
+      prevInitialFromRef.current = initialFromCode;
       setFromCode(initialFromCode);
       setIsExpanded(true);
       setSelectedRouteIndex(0);
+    } else if (!initialFromCode) {
+      prevInitialFromRef.current = null;
     }
   }, [initialFromCode]);
 
@@ -69,13 +84,45 @@ export default function JourneyPlanner({
   useEffect(() => {
     if (activePlan && onSelectRoute) {
       onSelectRoute(activePlan.intermediateStations);
+    } else if ((!fromCode || !toCode) && onSelectRoute) {
+      onSelectRoute([]);
     }
-  }, [activePlan, onSelectRoute]);
+  }, [activePlan, fromCode, toCode, onSelectRoute]);
+
+  const handleOriginChange = (code: string) => {
+    setFromCode(code);
+    if (code) {
+      notifyOriginSelected(code);
+    } else {
+      if (onSelectStation) {
+        onSelectStation(null);
+      }
+      if (onReset) {
+        onReset();
+      }
+    }
+  };
 
   const handleSwap = () => {
     const temp = fromCode;
     setFromCode(toCode);
     setToCode(temp);
+    if (toCode) {
+      notifyOriginSelected(toCode);
+    }
+  };
+
+  const handleResetRoute = () => {
+    setFromCode("");
+    setToCode("");
+    setSelectedRouteIndex(0);
+    prevInitialFromRef.current = null;
+    if (onSelectRoute) {
+      onSelectRoute([]);
+    }
+    if (onReset) {
+      onReset();
+    }
   };
 
   // Group stations by line for clean optgroups
@@ -95,9 +142,9 @@ export default function JourneyPlanner({
   }, [stations]);
 
   return (
-    <div className="w-full rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]/95 backdrop-blur-md p-4 shadow-xl transition-all sm:p-5">
+    <div className="w-full max-h-full flex flex-col rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]/95 backdrop-blur-md shadow-2xl overflow-hidden transition-all duration-200">
       {/* Header bar */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between border-b border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-5 py-4 shrink-0">
         <div className="flex items-center gap-2.5">
           <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-brand-600/15 text-brand-600 font-bold dark:bg-brand-500/20 dark:text-brand-400">
             🚆
@@ -107,25 +154,37 @@ export default function JourneyPlanner({
             <p className="text-[11px] text-[rgb(var(--text-muted))]">Live route logic, transfers & local fares</p>
           </div>
         </div>
-        <button
-          onClick={() => setIsExpanded(!isExpanded)}
-          className="rounded-lg px-2.5 py-1 text-xs font-semibold text-[rgb(var(--text-muted))] hover:bg-[rgb(var(--surface-2))] transition"
-        >
-          {isExpanded ? "Collapse" : "Expand"}
-        </button>
+        <div className="flex items-center gap-1.5">
+          {(fromCode || toCode) && (
+            <button
+              onClick={handleResetRoute}
+              title="Reset route and view normal map"
+              className="flex items-center gap-1 rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-2.5 py-1 text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition shadow-2xs"
+            >
+              <span>✕ Reset</span>
+            </button>
+          )}
+          <button
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="rounded-lg px-2.5 py-1 text-xs font-semibold text-[rgb(var(--text-muted))] hover:bg-[rgb(var(--surface-2))] transition"
+          >
+            {isExpanded ? "Collapse" : "Expand"}
+          </button>
+        </div>
       </div>
 
       {isExpanded && (
-        <div className="mt-3.5 space-y-3.5">
+        <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
           {/* Source & Destination selectors */}
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr,auto,1fr] sm:items-center">
             <div>
               <label className="mb-1 block text-[11px] font-semibold text-[rgb(var(--text-muted))]">Origin</label>
               <select
                 value={fromCode}
-                onChange={(e) => setFromCode(e.target.value)}
+                onChange={(e) => handleOriginChange(e.target.value)}
                 className="w-full rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface-2))] px-3 py-2 text-xs font-medium text-[rgb(var(--text))] focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600 sm:text-sm"
               >
+                <option value="">Select origin station...</option>
                 {Object.entries(groupedStations).map(([lineName, list]) => (
                   <optgroup key={lineName} label={`${lineName} Line`}>
                     {list.map((s) => (
@@ -156,6 +215,7 @@ export default function JourneyPlanner({
                 onChange={(e) => setToCode(e.target.value)}
                 className="w-full rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface-2))] px-3 py-2 text-xs font-medium text-[rgb(var(--text))] focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600 sm:text-sm"
               >
+                <option value="">Select destination station...</option>
                 {Object.entries(groupedStations).map(([lineName, list]) => (
                   <optgroup key={lineName} label={`${lineName} Line`}>
                     {list.map((s) => (
@@ -179,7 +239,7 @@ export default function JourneyPlanner({
                   key={r.label}
                   type="button"
                   onClick={() => {
-                    setFromCode(r.from);
+                    handleOriginChange(r.from);
                     setToCode(r.to);
                   }}
                   className={`shrink-0 rounded-full border px-2.5 py-0.5 text-[10px] font-medium transition ${
@@ -193,6 +253,15 @@ export default function JourneyPlanner({
               );
             })}
           </div>
+
+          {/* Empty state when reset */}
+          {!activePlan && (
+            <div className="rounded-xl border border-dashed border-[rgb(var(--border))] p-3.5 text-center bg-[rgb(var(--surface-2))]/50">
+              <p className="text-xs font-medium text-[rgb(var(--text-muted))]">
+                Select an origin and destination above, or tap any station on the map to explore.
+              </p>
+            </div>
+          )}
 
           {/* RESULTS AREA */}
           {activePlan && (

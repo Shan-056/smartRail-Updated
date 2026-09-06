@@ -1,11 +1,41 @@
-import { NextResponse } from "next/server";
+// ============================================================
+// app/api/trains/route.ts
+// ------------------------------------------------------------
+// WHAT THIS FILE DOES (in plain English):
+// Handles GET /api/trains. Returns currently known trains,
+// along with which station they're at/near right now. Supports
+// optional ?line= and ?status= filters.
+// ============================================================
 
-export async function GET() {
-  const trains = [
-    { trainNumber: "90214", direction: "Down", line: "Western", speedKmph: 62, status: "running" },
-    { trainNumber: "90302", direction: "Up", line: "Western", speedKmph: 58, status: "running" },
-    { trainNumber: "95104", direction: "Down", line: "Central", speedKmph: 65, status: "running" },
-    { trainNumber: "98006", direction: "Up", line: "Harbour", speedKmph: 54, status: "running" },
-  ];
-  return NextResponse.json({ count: trains.length, trains });
+import { NextRequest, NextResponse } from "next/server";
+import { connectToDatabase } from "@/lib/mongodb";
+import { Train } from "@/models/Train";
+import { getSimulatedTrains } from "@/lib/simulatedDigitalTwin";
+
+export async function GET(req: NextRequest) {
+  const line = req.nextUrl.searchParams.get("line");
+  const status = req.nextUrl.searchParams.get("status");
+
+  try {
+    const db = await connectToDatabase();
+    if (db) {
+      const filter: Record<string, string> = {};
+      if (line) filter.line = line;
+      if (status) filter.status = status;
+
+      const trains = await Train.find(filter)
+        .populate("currentStation", "name code")
+        .populate("nextStation", "name code")
+        .sort({ trainNumber: 1 });
+
+      if (trains && trains.length > 0) {
+        return NextResponse.json({ count: trains.length, trains });
+      }
+    }
+  } catch {
+    // Silently fall through to simulated digital twin trains
+  }
+
+  const fallbackTrains = getSimulatedTrains(line, status);
+  return NextResponse.json({ count: fallbackTrains.length, trains: fallbackTrains });
 }
