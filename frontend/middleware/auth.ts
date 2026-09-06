@@ -45,7 +45,13 @@ interface DecodedToken {
  * route handler catches and turns into a 401 response.
  */
 export async function requireAuth(req: NextRequest): Promise<IUser> {
-  const token = req.cookies.get("token")?.value;
+  let token = req.cookies.get("token")?.value;
+  if (!token) {
+    const authHeader = req.headers.get("authorization");
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      token = authHeader.substring(7).trim();
+    }
+  }
   if (!token) {
     throw new AuthError("Not authorized — please log in.");
   }

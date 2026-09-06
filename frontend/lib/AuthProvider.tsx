@@ -41,7 +41,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refreshSession = useCallback(async () => {
     try {
-      const res = await fetch("/api/auth/me", { credentials: "include" });
+      const headers: Record<string, string> = {};
+      if (typeof window !== "undefined") {
+        const token = localStorage.getItem("smartrail_token");
+        if (token) {
+          headers["Authorization"] = `Bearer ${token}`;
+        }
+      }
+      const res = await fetch("/api/auth/me", { credentials: "include", headers });
       if (res.ok) {
         const data = await res.json();
         if (data?.user) {
